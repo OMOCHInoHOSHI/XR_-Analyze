@@ -34,7 +34,7 @@ Python 3.9+ を推奨。
 
 ```bash
 cd "XR_ Analyze"
-python -m venv .venv
+python3 -m venv .venv
 # Mac/Linux:
 source .venv/bin/activate
 # Windows (PowerShell):
@@ -49,23 +49,35 @@ pip install -r backend/requirements.txt
 
 ### 0. どのカメラが使われるか確認 (内蔵 vs InnoMaker)
 
-MacBook Air では内蔵カメラが index 0、外付けInnoMakerは通常 index 1 です。
-既定で **名前一致 `CAM_NAME=Innomaker` により外付けを自動で狙い撃ち**しますが、
-確実に特定したいときは:
+OpenCV のカメラ index の並び順は環境依存で、**内蔵が index 0 とは限りません**
+(実機で InnoMaker=index 0, 内蔵=index 1 のケースを確認)。
+
+既定で **名前一致 `CAM_NAME=Innomaker` により外付けを自動選択**します。これを
+macOSで正しく機能させるには `pyobjc-framework-AVFoundation` (requirements.txt 同梱)
+が必要です。これで OpenCV と同じ並び順のカメラ名を取得して名前一致できます。
+未導入時は名前選択が効かないため `CAM_INDEX` を明示してください。
+
+確認:
 
 ```bash
-python -m backend.list_cameras
+python3 -m backend.list_cameras
 ```
 
-OSが認識しているカメラ名と、各 index の実解像度、今の設定で選ばれる番号を表示します。
-InnoMakerは1080pなので内蔵カメラと見分けられます。確実に固定したい場合は、
-表示された番号を `CAM_INDEX` に指定してください (例: `CAM_INDEX=1`)。
+AVFoundation(=OpenCVのindex順)のカメラ名・各 index の実解像度・選ばれる番号を表示。
+最終確認は check_camera で実映像を見るのが確実です:
+
+```bash
+CAM_INDEX=0 python3 -m backend.check_camera --raw
+CAM_INDEX=1 python3 -m backend.check_camera --raw
+```
+
+InnoMaker が映った番号を `CAM_INDEX` に指定すれば確実に固定できます。
 
 ### 1. まずカメラが映るか確認 (推奨)
 
 ```bash
-python -m backend.check_camera          # YOLO検出つき
-python -m backend.check_camera --raw    # 素の映像のみ
+python3 -m backend.check_camera          # YOLO検出つき
+python3 -m backend.check_camera --raw    # 素の映像のみ
 ```
 
 ウィンドウが開きます。`q` または `ESC` で終了。起動時に「どのカメラを選んだか」を
@@ -74,7 +86,7 @@ python -m backend.check_camera --raw    # 素の映像のみ
 ### 2. サーバ起動
 
 ```bash
-python -m backend.server
+python3 -m backend.server
 ```
 
 - ブラウザで `http://127.0.0.1:8100/` → 黒背景に検出枠 + デバッグ映像
@@ -124,7 +136,7 @@ python -m backend.server
 例 (別カメラ・高精度モデルで起動):
 
 ```bash
-CAM_INDEX=1 MODEL=yolov8s.pt python -m backend.server
+CAM_INDEX=1 MODEL=yolov8s.pt python3 -m backend.server
 ```
 
 ## メモ / 既知の制約

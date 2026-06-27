@@ -9,7 +9,7 @@
 
 起動:
   cd "XR_ Analyze"
-  python -m backend.server
+  python3 -m backend.server
 """
 from __future__ import annotations
 

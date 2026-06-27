@@ -1,6 +1,6 @@
 """
 設定値を一箇所に集約。環境変数で上書き可能。
-例: CAM_INDEX=1 MODEL=yolov8s.pt python -m backend.server
+例: CAM_INDEX=1 MODEL=yolov8s.pt python3 -m backend.server
 """
 from __future__ import annotations
 

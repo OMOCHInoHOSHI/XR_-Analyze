@@ -2,8 +2,8 @@
 サーバを立てずに「カメラが映るか/認識できるか」を確認するスタンドアロン。
 
   cd "XR_ Analyze"
-  python -m backend.check_camera          # 検出あり(YOLO)
-  python -m backend.check_camera --raw    # 検出なし(素のカメラ映像のみ)
+  python3 -m backend.check_camera          # 検出あり(YOLO)
+  python3 -m backend.check_camera --raw    # 検出なし(素のカメラ映像のみ)
 
 ウィンドウが開く。q または ESC で終了。
 """
