@@ -84,7 +84,7 @@ DEVICE: str = _auto_device()
 
 # --- 配信 ---
 HOST: str = os.environ.get("HOST", "127.0.0.1")
-PORT: int = _int("PORT", 8000)
+PORT: int = _int("PORT", 8100)
 # WebSocketで検出JSONを送る頻度の上限(fps)。
 STREAM_FPS: int = _int("STREAM_FPS", 15)
 # MJPEGデバッグ映像のJPEG品質(1-100)。

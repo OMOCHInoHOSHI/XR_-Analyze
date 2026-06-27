@@ -77,10 +77,10 @@ python -m backend.check_camera --raw    # 素の映像のみ
 python -m backend.server
 ```
 
-- ブラウザで `http://127.0.0.1:8000/` → 黒背景に検出枠 + デバッグ映像
+- ブラウザで `http://127.0.0.1:8100/` → 黒背景に検出枠 + デバッグ映像
   - `d` キーで映像のON/OFF (OFFにすると黒背景+枠だけ = AR表示の叩き台)
-- `http://127.0.0.1:8000/video` → 注釈付きMJPEGを直接表示
-- `http://127.0.0.1:8000/healthz` → 稼働確認 (fpsなど)
+- `http://127.0.0.1:8100/video` → 注釈付きMJPEGを直接表示
+- `http://127.0.0.1:8100/healthz` → 稼働確認 (fpsなど)
 
 ## WebSocket の出力フォーマット (クライアント非依存の契約)
 
@@ -116,7 +116,7 @@ python -m backend.server
 | `IMG_SIZE` | 640 | 推論サイズ(小さいほど速い) |
 | `DEVICE` | (自動) | `cpu` / `cuda` / `mps`。**Apple Siliconでは自動でmps(GPU)** |
 | `STREAM_FPS` | 15 | WebSocket/MJPEGの配信fps上限 |
-| `PORT` | 8000 | サーバポート |
+| `PORT` | 8100 | サーバポート |
 
 > Apple Silicon(M1〜)では `DEVICE` を指定しなくても自動で `mps`(GPU)が有効に
 > なります。明示的にCPUを使いたい場合のみ `DEVICE=cpu` を指定してください。
