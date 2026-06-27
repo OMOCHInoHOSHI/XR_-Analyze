@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# YOLO weights (auto-downloaded)
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db

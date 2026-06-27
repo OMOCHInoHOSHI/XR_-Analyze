@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>XR Analyze</title>
+<style>
+  /* AR(XREAL Air2Pro)では黒(#000)が光学シースルーで透明になる。
+     デバッグ映像をOFFにすると枠だけが現実に重なる想定。 */
+  html, body { margin: 0; height: 100%; background: #000; color: #0f0;
+    font-family: -apple-system, "Helvetica Neue", sans-serif; overflow: hidden; }
+  #stage { position: relative; width: 100vw; height: 100vh; }
+  /* デバッグ用MJPEG映像。AR表示時は 'd' キーで非表示にする。 */
+  #video { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; display: block; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #hud { position: absolute; top: 8px; left: 10px; font-size: 13px;
+    text-shadow: 0 0 2px #000; pointer-events: none; }
+  .box { position: absolute; border: 2px solid #00ff66; box-sizing: border-box; }
+  .label { position: absolute; transform: translateY(-100%);
+    background: #00ff66; color: #000; font-size: 12px; padding: 1px 4px;
+    white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <img id="video" src="/video" alt="debug video" />
+  <div id="overlay"></div>
+  <div id="hud">connecting…</div>
+</div>
+
+<script>
+// 'd' キーでデバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
+const video = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+const hud = document.getElementById("hud");
+let showVideo = true;
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "d") {
+    showVideo = !showVideo;
+    video.style.display = showVideo ? "block" : "none";
+  }
+});
+
+function render(payload) {
+  const stage = document.getElementById("stage");
+  const W = stage.clientWidth, H = stage.clientHeight;
+  overlay.innerHTML = "";
+  for (const d of payload.detections) {
+    const box = document.createElement("div");
+    box.className = "box";
+    box.style.left = (d.x * W) + "px";
+    box.style.top = (d.y * H) + "px";
+    box.style.width = (d.w * W) + "px";
+    box.style.height = (d.h * H) + "px";
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = `${d.label} ${(d.confidence * 100) | 0}%`;
+    box.appendChild(label);
+    overlay.appendChild(box);
+  }
+  hud.textContent =
+    `fps ${payload.fps} | objects ${payload.detections.length} | 'd':映像ON/OFF`;
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = (ev) => render(JSON.parse(ev.data));
+  ws.onclose = () => { hud.textContent = "disconnected — retrying…";
+    setTimeout(connect, 1000); };
+}
+connect();
+</script>
+</body>
+</html>
