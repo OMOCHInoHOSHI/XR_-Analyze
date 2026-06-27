@@ -37,12 +37,32 @@ class Detector:
         iou: float,
         imgsz: int,
         device: str = "",
+        classes: list[str] | None = None,
     ):
         self.conf = conf
         self.iou = iou
         self.imgsz = imgsz
         self.device = device or None  # 空文字なら ultralytics の自動選択
         self.model = YOLO(model_path)
+
+        # オープン語彙モデル(YOLOE/YOLO-World)でクラス指定がある場合は絞り込む。
+        # 通常のYOLO(COCO)モデルは set_classes を持たないので、その場合は無視。
+        if classes:
+            if hasattr(self.model, "set_classes"):
+                try:
+                    self.model.set_classes(classes)
+                    print(f"[detector] オープン語彙クラスを設定: {classes}")
+                except Exception as e:
+                    print(
+                        f"[detector] set_classes 失敗({e})。"
+                        " このモデルはテキスト指定に非対応の可能性があります。"
+                    )
+            else:
+                print(
+                    "[detector] このモデルはクラス指定(set_classes)に非対応のため "
+                    "CLASSES を無視します。YOLOE/YOLO-World系のモデルを指定してください。"
+                )
+
         self.names: dict[int, str] = self.model.names
 
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:

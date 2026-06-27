@@ -25,7 +25,8 @@ def main() -> None:
     args = ap.parse_args()
 
     detector = None if args.raw else Detector(
-        config.MODEL, config.CONF_THRES, config.IOU_THRES, config.IMG_SIZE, config.DEVICE
+        config.MODEL, config.CONF_THRES, config.IOU_THRES, config.IMG_SIZE,
+        config.DEVICE, config.CLASSES,
     )
 
     index, reason = select_camera_index(

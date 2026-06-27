@@ -44,8 +44,24 @@ CAM_HEIGHT: int = _int("CAM_HEIGHT", 720)
 CAM_FPS: int = _int("CAM_FPS", 30)
 
 # --- 検出モデル ---
-# COCO学習済みの軽量モデル。n<s<m<l<x で精度↑/速度↓。
+# 認識できる物体の種類はモデルで決まる:
+#   - yolov8n.pt 等(既定)        : COCO 80カテゴリ。最軽量・最速。
+#   - yoloe-11s-seg-pf.pt 等       : オープン語彙「プロンプトフリー」。LVIS等1200+の
+#                                    語彙で、クラス指定なしに見えたモノへ名前を付ける。
+#                                    「専門性不要・モノの名前が分かればいい」用途に最適。
+#   - yoloe-11s-seg.pt + CLASSES   : テキスト指定モード。CLASSESで挙げた任意の物体だけ
+#                                    を検出(例: CLASSES="wallet,watch,ring")。
+# モデル(.pt)は初回に自動ダウンロードされる。
 MODEL: str = os.environ.get("MODEL", "yolov8n.pt")
+
+# オープン語彙(YOLOE/YOLO-World)用: 検出したいクラス名をカンマ区切りで指定。
+# 指定すると set_classes() でそのクラスだけに絞る。空なら未使用
+# (= 通常モデルのCOCO80、またはプロンプトフリーモデルの内蔵語彙のまま)。
+_classes_raw: str = os.environ.get("CLASSES", "").strip()
+CLASSES: list[str] = (
+    [c.strip() for c in _classes_raw.split(",") if c.strip()] if _classes_raw else []
+)
+
 CONF_THRES: float = _float("CONF_THRES", 0.35)   # 信頼度しきい値
 IOU_THRES: float = _float("IOU_THRES", 0.45)
 # 推論サイズ(小さいほど速い)。640が標準。

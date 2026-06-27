@@ -31,7 +31,7 @@ class Pipeline:
         )
         self._detector = Detector(
             config.MODEL, config.CONF_THRES, config.IOU_THRES,
-            config.IMG_SIZE, config.DEVICE,
+            config.IMG_SIZE, config.DEVICE, config.CLASSES,
         )
         self._lock = threading.Lock()
         self._frame: Optional[np.ndarray] = None          # 最新の生フレーム(BGR)

@@ -123,7 +123,8 @@ python3 -m backend.server
 | `CAM_NAME` | Innomaker | この名前を含むカメラを自動選択(部分一致・macOS)。空で無効 |
 | `CAM_INDEX` | (未指定) | USBカメラ番号。**指定すると名前選択より優先**。内蔵は0、外付けは1など |
 | `CAM_WIDTH` / `CAM_HEIGHT` | 1280 / 720 | 取得解像度 |
-| `MODEL` | yolov8n.pt | n<s<m<l<x で精度↑/速度↓ |
+| `MODEL` | yolov8n.pt | 検出モデル。下記「認識できる物体を増やす」参照 |
+| `CLASSES` | (未指定) | オープン語彙モデルで検出する物体名(カンマ区切り)。例: `wallet,watch,ring` |
 | `CONF_THRES` | 0.35 | 信頼度しきい値 |
 | `IMG_SIZE` | 640 | 推論サイズ(小さいほど速い) |
 | `DEVICE` | (自動) | `cpu` / `cuda` / `mps`。**Apple Siliconでは自動でmps(GPU)** |
@@ -139,10 +140,47 @@ python3 -m backend.server
 CAM_INDEX=1 MODEL=yolov8s.pt python3 -m backend.server
 ```
 
+## 認識できる物体を増やす
+
+認識できる種類は**モデル**で決まります。用途に応じて `MODEL` を切り替えてください。
+
+### A) モノの名前を幅広く知りたい(専門性不要・推奨)
+
+オープン語彙の「プロンプトフリー」モデルに切り替えます。LVIS等 **1200以上の語彙**で、
+クラスを指定せずに見えたモノへ名前を付けます。
+
+```bash
+MODEL=yoloe-11s-seg-pf.pt python3 -m backend.server
+```
+
+- 初回はモデルを自動ダウンロード。`-pf` がプロンプトフリーの印。
+- ラベルは英語(例: `cup`, `wallet`, `keyboard`)。重い場合は速度重視で
+  `IMG_SIZE=480` などを併用。
+
+### B) 検出したい物体を自分で挙げる(テキスト指定)
+
+オープン語彙モデル + `CLASSES` で、挙げた物体だけを検出します。
+
+```bash
+MODEL=yoloe-11s-seg.pt CLASSES="wallet,watch,ring,coin,trading card" \
+  python3 -m backend.server
+```
+
+- `CLASSES` に無い物体は出ません。狙った物だけ拾いたいときに有効。
+- テキスト指定モードは初回にテキストエンコーダ(CLIP系)を自動取得する場合があります。
+
+### C) 既定(最軽量)
+
+`MODEL` 未指定なら `yolov8n.pt`(COCO 80カテゴリ)。最速・最小です。
+
+> 補足: いずれも Apple Silicon では自動で `mps`(GPU)が使われます。オープン語彙
+> モデルは標準YOLOより重いので、まず `yoloe-11s-...`(s=small)から試すのが無難です。
+
 ## メモ / 既知の制約
 
-- COCO学習済みモデルは約80カテゴリ(人・車・椅子・カップ等)を検出します。
-  「鑑定」固有の対象を見分けるには独自データでの追加学習が必要です(別途)。
+- 既定の COCO 学習済みモデルは約80カテゴリ。上記Aのオープン語彙モデルなら1200+に拡張。
+- いずれも一般物体の認識です。「鑑定」固有の特定個体(特定商品・カード等)の判別には
+  独自データでの追加学習(fine-tune)が別途必要です。
 - macOSでは初回にカメラ使用許可のダイアログが出ます。許可してください。
 - AR(XREAL Air2Pro)での現実への重ね合わせは、カメラ画角と視界の座標対応が
   別途必要です(memoryの未決事項)。本リポジトリは検出基盤までを提供します。
