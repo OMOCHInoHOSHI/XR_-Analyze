@@ -43,6 +43,20 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
+### .venv の入り方・抜け出し方
+
+```bash
+# 入る (Mac/Linux)
+source .venv/bin/activate
+# 入る (Windows PowerShell)
+.venv\Scripts\Activate.ps1
+
+# 抜ける (共通)
+deactivate
+```
+
+有効時はプロンプトの先頭に `(.venv)` が付きます。`deactivate` でシステムの Python に戻ります。
+
 初回実行時、YOLOモデル (`yolov8n.pt`) は自動ダウンロードされます。
 
 ## 使い方
@@ -181,7 +195,7 @@ CAM_INDEX=1 MODEL=yolov8s.pt python3 -m backend.server
 精度優先なら大きいモデルを使います(s < m < l で精度↑/速度↓):
 
 ```bash
-# 精度優先(推奨): l サイズ
+# 精度優先(推奨): l サイズ これをよく使う
 MODEL=yoloe-11l-seg-pf.pt python3 -m backend.server
 
 # 速度優先: s サイズ
