@@ -115,6 +115,13 @@ python3 -m backend.server
 
 - 座標 `x,y,w,h` は **0.0–1.0 の正規化値**。原点は左上、x右/y下が正。
   表示側の解像度に依存しないので、Unity/Androidでもそのまま使えます。
+- `label` は英語(クライアント非依存の契約)、`label_ja` は日本語表示名です。
+  辞書(`backend/labels_ja.py`)に無い語は `label_ja` も英語のままになります。
+
+> 表示: ブラウザのオーバーレイ枠と MJPEG映像は、検出名を**日本語・大きめ**で
+> 表示します。MJPEGの日本語描画には日本語フォントが必要で、macOS/Windowsでは
+> 自動検出します。文字化け(□)する場合のみ `JP_FONT` でフォントを指定してください。
+> 辞書外の語を日本語化したい時は `backend/labels_ja.py` に追記できます。
 
 ## 設定 (環境変数で上書き)
 
@@ -129,6 +136,7 @@ python3 -m backend.server
 | `IMG_SIZE` | 640 | 推論サイズ(小さいほど速い) |
 | `DEVICE` | (自動) | `cpu` / `cuda` / `mps`。**Apple Siliconでは自動でmps(GPU)** |
 | `STREAM_FPS` | 15 | WebSocket/MJPEGの配信fps上限 |
+| `JP_FONT` | (自動) | MJPEGの日本語描画フォント。自動検出に失敗する時だけ .ttc/.ttf を指定 |
 | `PORT` | 8100 | サーバポート |
 
 > Apple Silicon(M1〜)では `DEVICE` を指定しなくても自動で `mps`(GPU)が有効に

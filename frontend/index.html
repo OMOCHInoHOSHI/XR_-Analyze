@@ -16,10 +16,12 @@
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
   #hud { position: absolute; top: 8px; left: 10px; font-size: 13px;
     text-shadow: 0 0 2px #000; pointer-events: none; }
-  .box { position: absolute; border: 2px solid #00ff66; box-sizing: border-box; }
+  .box { position: absolute; border: 3px solid #00ff66; box-sizing: border-box; }
   .label { position: absolute; transform: translateY(-100%);
-    background: #00ff66; color: #000; font-size: 12px; padding: 1px 4px;
-    white-space: nowrap; }
+    background: #00ff66; color: #000; font-size: 28px; font-weight: 700;
+    line-height: 1.2; padding: 2px 8px; white-space: nowrap;
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+      "Yu Gothic", Meiryo, sans-serif; }
 </style>
 </head>
 <body>
@@ -56,7 +58,9 @@ function render(payload) {
     box.style.height = (d.h * H) + "px";
     const label = document.createElement("div");
     label.className = "label";
-    label.textContent = `${d.label} ${(d.confidence * 100) | 0}%`;
+    // 日本語表示名(label_ja)を優先。無ければ英語ラベル。
+    const name = d.label_ja || d.label;
+    label.textContent = `${name} ${(d.confidence * 100) | 0}%`;
     box.appendChild(label);
     overlay.appendChild(box);
   }
