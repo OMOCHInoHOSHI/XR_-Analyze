@@ -7,6 +7,10 @@ venv/
 # YOLO weights (auto-downloaded)
 *.pt
 
+# 語彙ダンプ(dump_vocab の出力。再生成可能)
+vocab.json
+vocab_untranslated.json
+
 # OS
 .DS_Store
 Thumbs.db

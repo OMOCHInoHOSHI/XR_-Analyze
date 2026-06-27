@@ -141,8 +141,36 @@ try:
 except Exception:
     LVIS_JA = {}
 
-# 統合辞書(後勝ち): LVIS をベースに、COCO/一般語で上書き
-_TABLE: dict[str, str] = {**LVIS_JA, **COCO_JA, **EXTRA_JA}
+
+def _load_machine_dict() -> dict[str, str]:
+    """
+    build_ja_dict.py が生成した ja_vocab.json(機械翻訳)を読み込む。
+    キーは小文字化して取り込む。最優先度は低く(下の統合で上書きされる)、
+    キュレーション辞書(LVIS/COCO/手動)が常に優先される。
+    """
+    import json
+    import os
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "ja_vocab.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        raw = json.load(open(path, encoding="utf-8"))
+        return {str(k).strip().lower(): v for k, v in raw.items() if v}
+    except Exception:
+        return {}
+
+
+# 統合辞書(後勝ち=後ろほど優先):
+#   機械翻訳(ja_vocab) < LVIS < COCO < 手動(EXTRA)
+# 同音異義などで機械翻訳が外しやすい語は、キュレーション辞書が上書きする。
+_TABLE: dict[str, str] = {
+    **_load_machine_dict(),
+    **LVIS_JA,
+    **COCO_JA,
+    **EXTRA_JA,
+}
 
 
 def to_ja(name: str) -> str:

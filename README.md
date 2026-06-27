@@ -121,7 +121,26 @@ python3 -m backend.server
 > 表示: ブラウザのオーバーレイ枠と MJPEG映像は、検出名を**日本語・大きめ**で
 > 表示します。MJPEGの日本語描画には日本語フォントが必要で、macOS/Windowsでは
 > 自動検出します。文字化け(□)する場合のみ `JP_FONT` でフォントを指定してください。
-> 辞書外の語を日本語化したい時は `backend/labels_ja.py` に追記できます。
+
+### 日本語の語彙を完全網羅する(任意)
+
+YOLOEプロンプトフリーの語彙は約4585語あり、`labels_ja_lvis.py`(LVIS1203)+手動辞書で
+カバーしきれない語は英語のまま出ます。残り全部を機械翻訳で一括日本語化できます:
+
+```bash
+# 1) 実際の語彙を書き出し
+MODEL=yoloe-11m-seg-pf.pt python3 -m backend.dump_vocab
+# 2) 翻訳エンジン(どちらか)
+pip install argostranslate      # 推奨: オフライン
+# pip install deep-translator   # オンライン(Google)
+# 3) 未翻訳語を一括翻訳して ja_vocab.json を生成
+python3 -m backend.build_ja_dict
+```
+
+生成された `ja_vocab.json` はアプリが自動で読み込みます。優先順位は
+**機械翻訳 < LVIS < COCO < 手動** なので、同音異義語(bat/mouse/tank等)は
+キュレーション辞書が優先され誤訳になりにくい構造です。気になる訳は
+`ja_vocab.json` か `backend/labels_ja.py` を直接編集してください。
 
 ## 設定 (環境変数で上書き)
 
