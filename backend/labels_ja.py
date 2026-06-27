@@ -126,6 +126,14 @@ EXTRA_JA: dict[str, str] = {
     "guitar": "ギター",
     "ball": "ボール",
     "doll": "人形",
+    # YOLOE-pf語彙(LVIS外)で確認された語の即時追加
+    "stuffed toy": "ぬいぐるみ",
+    "baby bottle": "哺乳瓶",
+    "tablet computer": "タブレット",
+    "tablet": "タブレット",
+    "laptop keyboard": "キーボード",
+    "insulated thermos": "水筒",
+    "thermos": "水筒",
 }
 
 try:
