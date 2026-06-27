@@ -128,11 +128,26 @@ EXTRA_JA: dict[str, str] = {
     "doll": "人形",
 }
 
-_TABLE: dict[str, str] = {**COCO_JA, **EXTRA_JA}
+try:
+    from .labels_ja_lvis import LVIS_JA  # LVIS 1203カテゴリの対訳
+except Exception:
+    LVIS_JA = {}
+
+# 統合辞書(後勝ち): LVIS をベースに、COCO/一般語で上書き
+_TABLE: dict[str, str] = {**LVIS_JA, **COCO_JA, **EXTRA_JA}
 
 
 def to_ja(name: str) -> str:
-    """英語ラベルを日本語へ。辞書に無ければ元の英語をそのまま返す。"""
+    """
+    英語ラベルを日本語へ。辞書に無ければ元の英語をそのまま返す。
+    LVIS名は "aerosol can/spray can" のように同義語が "/" 区切りで来るため、
+    フル文字列 → 最初の同義語 の順で照合する。
+    """
     if not name:
         return name
-    return _TABLE.get(name.strip().lower(), name)
+    key = name.strip().lower()
+    if key in _TABLE:
+        return _TABLE[key]
+    # 最初の同義語(最初の "/" より前)で再照合
+    first = key.split("/", 1)[0].strip()
+    return _TABLE.get(first, name)

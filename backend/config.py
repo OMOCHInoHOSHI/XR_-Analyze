@@ -66,6 +66,9 @@ CONF_THRES: float = _float("CONF_THRES", 0.35)   # 信頼度しきい値
 IOU_THRES: float = _float("IOU_THRES", 0.45)
 # 推論サイズ(小さいほど速い)。640が標準。
 IMG_SIZE: int = _int("IMG_SIZE", 640)
+# 一度に表示・配信する検出数の上限(信頼度の高い順にN件)。
+# 多クラスモデルで表示が増えすぎる/重い時に小さくする。0以下で無制限。
+MAX_DET: int = _int("MAX_DET", 15)
 def _auto_device() -> str:
     """
     推論デバイスを決める。

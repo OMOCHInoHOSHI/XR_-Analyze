@@ -65,6 +65,10 @@ class Pipeline:
                 continue
             try:
                 dets = self._detector.detect(frame)
+                # 信頼度の高い順に上限件数だけ残す(表示過多と負荷を抑える)
+                if config.MAX_DET > 0 and len(dets) > config.MAX_DET:
+                    dets.sort(key=lambda d: d.confidence, reverse=True)
+                    dets = dets[: config.MAX_DET]
             except Exception as e:  # 推論失敗してもループは止めない
                 self._error = f"detect error: {e}"
                 dets = []

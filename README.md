@@ -132,6 +132,7 @@ python3 -m backend.server
 | `CAM_WIDTH` / `CAM_HEIGHT` | 1280 / 720 | 取得解像度 |
 | `MODEL` | yolov8n.pt | 検出モデル。下記「認識できる物体を増やす」参照 |
 | `CLASSES` | (未指定) | オープン語彙モデルで検出する物体名(カンマ区切り)。例: `wallet,watch,ring` |
+| `MAX_DET` | 15 | 一度に表示する検出数の上限(信頼度上位N件)。0以下で無制限 |
 | `CONF_THRES` | 0.35 | 信頼度しきい値 |
 | `IMG_SIZE` | 640 | 推論サイズ(小さいほど速い) |
 | `DEVICE` | (自動) | `cpu` / `cuda` / `mps`。**Apple Siliconでは自動でmps(GPU)** |
@@ -154,16 +155,24 @@ CAM_INDEX=1 MODEL=yolov8s.pt python3 -m backend.server
 
 ### A) モノの名前を幅広く知りたい(専門性不要・推奨)
 
-オープン語彙の「プロンプトフリー」モデルに切り替えます。LVIS等 **1200以上の語彙**で、
-クラスを指定せずに見えたモノへ名前を付けます。
+オープン語彙の「プロンプトフリー」モデルに切り替えます。LVIS **1203カテゴリ**で、
+クラスを指定せずに見えたモノへ名前を付けます。**この1203語は全て日本語対訳済み**
+(`backend/labels_ja_lvis.py`)なので、表示は日本語になります。
+
+精度優先なら大きいモデルを使います(s < m < l で精度↑/速度↓):
 
 ```bash
+# 精度優先(推奨): l サイズ
+MODEL=yoloe-11l-seg-pf.pt python3 -m backend.server
+
+# 速度優先: s サイズ
 MODEL=yoloe-11s-seg-pf.pt python3 -m backend.server
 ```
 
 - 初回はモデルを自動ダウンロード。`-pf` がプロンプトフリーの印。
-- ラベルは英語(例: `cup`, `wallet`, `keyboard`)。重い場合は速度重視で
-  `IMG_SIZE=480` などを併用。
+- 重い場合は `MAX_DET`(同時表示数)を下げる、`IMG_SIZE=512` 等を併用。
+- 辞書外の語(オープン語彙でまれに出る)は英語のまま表示され、`labels_ja_lvis.py`
+  に追記すれば日本語化できます。
 
 ### B) 検出したい物体を自分で挙げる(テキスト指定)
 
