@@ -33,7 +33,9 @@ def main() -> None:
         config.CAM_INDEX_ENV, config.CAM_NAME, config.CAM_INDEX
     )
     print(f"[camera] {reason}")
-    with Camera(index, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FPS) as cam:
+    with Camera(
+        index, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FPS, config.CAM_FLIP,
+    ) as cam:
         print(f"camera size = {cam.actual_size}, index = {index}")
         last = time.time()
         fps = 0.0

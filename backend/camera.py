@@ -41,6 +41,21 @@ def select_camera_index(
     )
 
 
+# CAM_FLIP の値 -> cv2.flip の flipCode。None は反転しない。
+_FLIP_CODES: dict[str, Optional[int]] = {
+    "180": -1,   # 上下+左右 = 180°回転
+    "v": 0,      # 上下のみ
+    "h": 1,      # 左右のみ
+    "none": None,
+    "": None,
+}
+
+
+def flip_code_for(mode: str) -> Optional[int]:
+    """CAM_FLIP の文字列を cv2.flip の flipCode に変換する。未知の値は反転なし。"""
+    return _FLIP_CODES.get(mode.strip().lower())
+
+
 def _backend_for_os() -> int:
     system = platform.system()
     if system == "Darwin":
@@ -55,11 +70,14 @@ def _backend_for_os() -> int:
 class Camera:
     """USBカメラからフレームを読むラッパー。"""
 
-    def __init__(self, index: int, width: int, height: int, fps: int):
+    def __init__(
+        self, index: int, width: int, height: int, fps: int, flip: str = "none"
+    ):
         self.index = index
         self.width = width
         self.height = height
         self.fps = fps
+        self._flip_code = flip_code_for(flip)
         self._cap: Optional[cv2.VideoCapture] = None
 
     def open(self) -> None:
@@ -93,10 +111,13 @@ class Camera:
         self._cap = cap
 
     def read(self):
-        """(ok, frame) を返す。frame は BGR numpy 配列。"""
+        """(ok, frame) を返す。frame は BGR numpy 配列(向き補正済み)。"""
         if self._cap is None:
             raise RuntimeError("open() を先に呼んでください。")
-        return self._cap.read()
+        ok, frame = self._cap.read()
+        if ok and frame is not None and self._flip_code is not None:
+            frame = cv2.flip(frame, self._flip_code)
+        return ok, frame
 
     @property
     def actual_size(self) -> tuple[int, int]:

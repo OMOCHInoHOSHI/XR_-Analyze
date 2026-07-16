@@ -27,7 +27,8 @@ class Pipeline:
         self.cam_reason = reason
         print(f"[camera] {reason}")
         self._camera = Camera(
-            index, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FPS
+            index, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FPS,
+            config.CAM_FLIP,
         )
         self._detector = Detector(
             config.MODEL, config.CONF_THRES, config.IOU_THRES,
