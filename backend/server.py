@@ -6,6 +6,7 @@
   GET  /healthz     -> 稼働確認 + 実測fps
   WS   /ws          -> 検出結果JSONをSTREAM_FPSで配信 (Web/Unity/Android共通の契約)
   GET  /video       -> 注釈付きMJPEG (デバッグ確認用。ブラウザで直接開ける)
+  POST /calib       -> 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ)
 
 起動:
   cd "XR_ Analyze"
@@ -21,6 +22,7 @@ from pathlib import Path
 import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from . import config
 from .detector import Detector
@@ -69,6 +71,34 @@ async def index():
     return JSONResponse(
         {"message": "backend running", "ws": "/ws", "video": "/video", "health": "/healthz"}
     )
+
+
+class CalibRequest(BaseModel):
+    """ズーム/オフセットの調整量。すべて差分(絶対値ではない)。"""
+
+    dzoom: float = 0.0     # ズーム倍率の増減
+    dx: float = 0.0        # 切り抜き中心の水平移動 (全体比、+で右)
+    dy: float = 0.0        # 切り抜き中心の垂直移動 (全体比、+で下)
+    reset: bool = False    # 真なら差分を無視して zoom=1.0 / offset=0,0 に戻す
+
+
+@app.post("/calib")
+async def calib(req: CalibRequest):
+    """
+    稼働中にカメラのデジタルズーム/切り抜き位置を調整する(グラスの視界合わせ用)。
+
+    フロント(frontend/index.html)のキー操作から呼ばれる。差分で受けてクランプ後の
+    確定値を返すので、フロントは自前で値を持たずサーバの値をそのまま表示できる。
+    """
+    if pipeline is None:
+        return JSONResponse({"status": "starting"}, status_code=503)
+    view = pipeline.adjust_view(req.dzoom, req.dx, req.dy, req.reset)
+    # check_camera の終了時出力と同じ形式。次回起動にそのままコピペできる。
+    print(
+        f"[calib] CAM_ZOOM={view['zoom']} "
+        f"CAM_OFFSET_X={view['offset_x']} CAM_OFFSET_Y={view['offset_y']}"
+    )
+    return view
 
 
 @app.websocket("/ws")

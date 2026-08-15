@@ -28,7 +28,7 @@ class Pipeline:
         print(f"[camera] {reason}")
         self._camera = Camera(
             index, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FPS,
-            config.CAM_FLIP,
+            config.CAM_FLIP, config.CAM_ZOOM, config.CAM_OFFSET_X, config.CAM_OFFSET_Y,
         )
         self._detector = Detector(
             config.MODEL, config.CONF_THRES, config.IOU_THRES,
@@ -85,6 +85,30 @@ class Pipeline:
                     # 軽い指数移動平均で実測fpsをならす
                     self._fps = 0.8 * self._fps + 0.2 * (1.0 / dt) if self._fps else 1.0 / dt
 
+    # --- ライブ調整 ---
+    def view(self) -> dict:
+        """現在のズーム/オフセット。"""
+        zoom, off_x, off_y = self._camera.view
+        return {"zoom": zoom, "offset_x": off_x, "offset_y": off_y}
+
+    def adjust_view(
+        self, dzoom: float = 0.0, dx: float = 0.0, dy: float = 0.0, reset: bool = False
+    ) -> dict:
+        """
+        ズーム/オフセットを差分で動かし、クランプ後の確定値を返す。
+
+        書き込むのはリクエストハンドラのみ、読取ループ(_loop)は参照するだけなので
+        ロックは持たない。仮に更新の途中で読まれても、そのフレームの切り抜き位置が
+        1コマぶん中途半端になるだけで次のフレームから正しくなる。
+        """
+        if reset:
+            zoom, off_x, off_y = 1.0, 0.0, 0.0
+        else:
+            zoom, off_x, off_y = self._camera.view
+            zoom, off_x, off_y = zoom + dzoom, off_x + dx, off_y + dy
+        self._camera.set_view(zoom, off_x, off_y)
+        return self.view()
+
     # --- 参照系(スレッドセーフ) ---
     def snapshot(self) -> tuple[int, Optional[np.ndarray], list[Detection]]:
         with self._lock:
@@ -99,6 +123,8 @@ class Pipeline:
             "ts": time.time(),
             "fps": round(self._fps, 1),
             "source_size": {"w": w, "h": h},
+            # フロントの HUD 表示用。サーバが持つ値を正とし、クランプ後の実値を返す。
+            "view": self.view(),
             "detections": [d.to_dict() for d in dets],
             "error": self._error,
         }

@@ -32,18 +32,67 @@
 </div>
 
 <script>
-// 'd' キーでデバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
+// キー操作:
+//   d        : デバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
+//   + / = / -: デジタルズームの増減
+//   ↑↓←→    : 切り抜き位置(表示位置)の移動
+//   0        : ズーム・位置をリセット
+// ズーム/位置はサーバ側のカメラ切り抜きを動かすので、映像も検出枠も一緒に動く。
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
 let showVideo = true;
 
+const STEP_ZOOM = 0.1;
+const STEP_OFFSET = 0.01;
+
+// 調整はサーバに差分で投げるだけ。確定値は WS ペイロードの view で受け取るため
+// ここでは状態を持たない(クランプ後の実値とHUD表示が必ず一致する)。
+function calib(body) {
+  fetch("/calib", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {}); // 一時的な失敗は次のキー操作で取り戻せるので握りつぶす
+}
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "d") {
-    showVideo = !showVideo;
-    video.style.display = showVideo ? "block" : "none";
+  // 修飾キー付きはブラウザ標準ショートカットなので触らない。特に macOS の
+  // Cmd+0 / Cmd+= / Cmd+- (ページの拡大縮小) を拾うと、調整中の値が
+  // 意図せずリセットされてしまう。
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  switch (e.key) {
+    case "d":
+      showVideo = !showVideo;
+      video.style.display = showVideo ? "block" : "none";
+      break;
+    case "+": case "=":
+      calib({ dzoom: STEP_ZOOM });
+      break;
+    case "-":
+      calib({ dzoom: -STEP_ZOOM });
+      break;
+    // 切り抜き位置を動かす向き。↑ なら「より上」が見えるようになる
+    // (check_camera の w/a/s/d と同じ意味)。
+    case "ArrowUp":
+      e.preventDefault(); calib({ dy: -STEP_OFFSET });
+      break;
+    case "ArrowDown":
+      e.preventDefault(); calib({ dy: STEP_OFFSET });
+      break;
+    case "ArrowLeft":
+      e.preventDefault(); calib({ dx: -STEP_OFFSET });
+      break;
+    case "ArrowRight":
+      e.preventDefault(); calib({ dx: STEP_OFFSET });
+      break;
+    case "0":
+      calib({ reset: true });
+      break;
   }
 });
+
+const signed = (v) => (v < 0 ? "" : "+") + v.toFixed(2);
 
 function render(payload) {
   const stage = document.getElementById("stage");
@@ -64,8 +113,13 @@ function render(payload) {
     box.appendChild(label);
     overlay.appendChild(box);
   }
+  const v = payload.view;
+  const calibText = v
+    ? ` | zoom ${v.zoom.toFixed(2)} off(${signed(v.offset_x)},${signed(v.offset_y)})`
+    : "";
   hud.textContent =
-    `fps ${payload.fps} | objects ${payload.detections.length} | 'd':映像ON/OFF`;
+    `fps ${payload.fps} | objects ${payload.detections.length}${calibText}` +
+    ` | 'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  0:リセット`;
 }
 
 function connect() {
