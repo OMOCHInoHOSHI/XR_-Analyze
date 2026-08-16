@@ -6,6 +6,7 @@
   GET  /healthz     -> 稼働確認 + 実測fps
   WS   /ws          -> 検出結果JSONをSTREAM_FPSで配信 (Web/Unity/Android共通の契約)
   GET  /video       -> 注釈付きMJPEG (デバッグ確認用。ブラウザで直接開ける)
+                       ?annotate=0 で枠を焼き込まない素の映像 (フロントはこちらを使う)
   POST /calib       -> 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ)
 
 起動:
@@ -123,7 +124,7 @@ async def ws_detections(ws: WebSocket):
         return
 
 
-def _mjpeg_generator():
+def _mjpeg_generator(annotate: bool):
     boundary = b"--frame"
     encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.JPEG_QUALITY]
     while True:
@@ -134,8 +135,9 @@ def _mjpeg_generator():
         if frame is None:
             time.sleep(0.02)
             continue
-        annotated = Detector.annotate(frame, dets)
-        ok, buf = cv2.imencode(".jpg", annotated, encode_params)
+        if annotate:
+            frame = Detector.annotate(frame, dets)
+        ok, buf = cv2.imencode(".jpg", frame, encode_params)
         if not ok:
             continue
         yield (
@@ -147,9 +149,16 @@ def _mjpeg_generator():
 
 
 @app.get("/video")
-async def video():
+async def video(annotate: bool = True):
+    """
+    注釈付きMJPEG。`?annotate=0` で枠・ラベルを焼き込まない素の映像になる。
+
+    フロント(frontend/index.html)は annotate=0 で読む。HTML側で枠を重ねて描くため、
+    焼き込みも有効だと枠が二重になり、さらに 'd' で映像を消したときに焼き込んだ枠だけ
+    が一緒に消えて紛らわしいため。日本語ラベルの描画コストも省ける。
+    """
     return StreamingResponse(
-        _mjpeg_generator(),
+        _mjpeg_generator(annotate),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 

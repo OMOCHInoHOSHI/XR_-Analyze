@@ -26,7 +26,8 @@
 </head>
 <body>
 <div id="stage">
-  <img id="video" src="/video" alt="debug video" />
+  <!-- annotate=0: 枠とラベルはこのページ側(#overlay)で描くため、映像には焼き込ませない -->
+  <img id="video" src="/video?annotate=0" alt="debug video" />
   <div id="overlay"></div>
   <div id="hud">connecting…</div>
 </div>
