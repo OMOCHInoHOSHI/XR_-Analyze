@@ -7,6 +7,13 @@ from __future__ import annotations
 import os
 import platform
 
+from .calib_store import calib_path as _calib_path
+from .calib_store import load as _load_saved_view
+
+# サーバ画面で 's' を押して保存した調整値(ズーム/切り抜き位置)。
+# 環境変数で明示されていない項目だけがこの値を初期値として使う。
+_SAVED_VIEW: dict[str, float] = _load_saved_view()
+
 
 def _int(name: str, default: int) -> int:
     try:
@@ -20,6 +27,23 @@ def _float(name: str, default: float) -> float:
         return float(os.environ.get(name, default))
     except (TypeError, ValueError):
         return default
+
+
+def _float_view(name: str, saved_key: str, default: float) -> float:
+    """
+    調整値を「環境変数 > 保存ファイル(calib.json) > 既定値」の優先順位で読む。
+
+    明示指定を最優先にするのは CAM_INDEX と同じ方針。保存済みの値があっても
+    `CAM_ZOOM=1.5 python3 -m backend.server` のような一時的な上書きが効く。
+    """
+    raw = os.environ.get(name, "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass  # 不正な値は指定が無かったものとして扱う
+    saved = _SAVED_VIEW.get(saved_key)
+    return default if saved is None else saved
 
 
 # --- カメラ ---
@@ -53,14 +77,23 @@ CAM_FLIP: str = os.environ.get("CAM_FLIP", "180").strip().lower()
 
 # デジタルズーム倍率。1.0で等倍(クロップなし)。1.5なら幅・高さを1/1.5に中央クロップする。
 # 1.0未満は余白を足す意味になり無効なので1.0にクランプする。
-CAM_ZOOM: float = max(1.0, _float("CAM_ZOOM", 1.0))
+CAM_ZOOM: float = max(1.0, _float_view("CAM_ZOOM", "zoom", 1.0))
 
 # 切り抜き中心のオフセット。フレーム全体の幅/高さに対する正規化値
 # (「残り余白に対する比率」ではなく全体比にすることで、ズーム倍率を変えても
 #  オフセットの意味が変わらず、調整をやり直さずに済む)。
 # 0.1 = フレーム幅の10%ぶん右へ、-0.1 = 10%ぶん左へ。yは+で下へ。
-CAM_OFFSET_X: float = _float("CAM_OFFSET_X", 0.0)
-CAM_OFFSET_Y: float = _float("CAM_OFFSET_Y", 0.0)
+CAM_OFFSET_X: float = _float_view("CAM_OFFSET_X", "offset_x", 0.0)
+CAM_OFFSET_Y: float = _float_view("CAM_OFFSET_Y", "offset_y", 0.0)
+
+# 調整値の保存先(サーバ画面の 's' キーで書き込む)。CALIB_FILE で変更可。
+CALIB_FILE: str = str(_calib_path())
+if _SAVED_VIEW:
+    # 表示するのは環境変数の上書きまで含めた確定値(実際にカメラへ渡る初期値)。
+    print(
+        f"[calib] {CALIB_FILE} を読み込みました。初期値: "
+        f"CAM_ZOOM={CAM_ZOOM} CAM_OFFSET_X={CAM_OFFSET_X} CAM_OFFSET_Y={CAM_OFFSET_Y}"
+    )
 
 # --- 検出モデル ---
 # 認識できる物体の種類はモデルで決まる:

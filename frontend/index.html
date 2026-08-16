@@ -37,6 +37,7 @@
 //   d        : デバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
 //   + / = / -: デジタルズームの増減
 //   ↑↓←→    : 切り抜き位置(表示位置)の移動
+//   s        : 現在のズーム/位置を保存 (次回起動時に自動で復元)
 //   0        : ズーム・位置をリセット
 // ズーム/位置はサーバ側のカメラ切り抜きを動かすので、映像も検出枠も一緒に動く。
 const video = document.getElementById("video");
@@ -47,6 +48,25 @@ let showVideo = true;
 const STEP_ZOOM = 0.1;
 const STEP_OFFSET = 0.01;
 
+// 保存結果などの一時メッセージ。HUDはWS受信ごとに描き直されるため、
+// 期限(ms)を持たせて render() 側で合成する。
+let toastText = "";
+let toastUntil = 0;
+let lastPayload = null;  // 直近のWSペイロード(WS受信を待たずに描き直すため)
+
+function toast(text, ms = 2000) {
+  toastText = text;
+  toastUntil = Date.now() + ms;
+  // 新フレームが来ないと /ws は送信しないので、カメラが止まっている時でも
+  // 保存結果が見えるよう、直近のペイロードで即座に描き直す。
+  if (lastPayload) {
+    render(lastPayload);
+    setTimeout(() => {
+      if (lastPayload && Date.now() >= toastUntil) render(lastPayload);
+    }, ms + 50);  // 期限切れでメッセージを消すための描き直し
+  }
+}
+
 // 調整はサーバに差分で投げるだけ。確定値は WS ペイロードの view で受け取るため
 // ここでは状態を持たない(クランプ後の実値とHUD表示が必ず一致する)。
 function calib(body) {
@@ -55,6 +75,17 @@ function calib(body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }).catch(() => {}); // 一時的な失敗は次のキー操作で取り戻せるので握りつぶす
+}
+
+// 現在値をサーバ側のファイルへ保存する。保存できたかどうかは調整のやり直しに
+// 直結するので、こちらは結果をHUDに出す。
+function saveCalib() {
+  fetch("/calib/save", { method: "POST" })
+    .then((r) => r.json())
+    .then((d) => {
+      toast(d.status === "ok" ? `saved → ${d.file}` : "save failed");
+    })
+    .catch(() => toast("save failed"));
 }
 
 document.addEventListener("keydown", (e) => {
@@ -87,6 +118,9 @@ document.addEventListener("keydown", (e) => {
     case "ArrowRight":
       e.preventDefault(); calib({ dx: STEP_OFFSET });
       break;
+    case "s":
+      saveCalib();
+      break;
     case "0":
       calib({ reset: true });
       break;
@@ -96,6 +130,7 @@ document.addEventListener("keydown", (e) => {
 const signed = (v) => (v < 0 ? "" : "+") + v.toFixed(2);
 
 function render(payload) {
+  lastPayload = payload;
   const stage = document.getElementById("stage");
   const W = stage.clientWidth, H = stage.clientHeight;
   overlay.innerHTML = "";
@@ -118,9 +153,11 @@ function render(payload) {
   const calibText = v
     ? ` | zoom ${v.zoom.toFixed(2)} off(${signed(v.offset_x)},${signed(v.offset_y)})`
     : "";
+  const toastPart = Date.now() < toastUntil ? ` | ${toastText}` : "";
   hud.textContent =
     `fps ${payload.fps} | objects ${payload.detections.length}${calibText}` +
-    ` | 'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  0:リセット`;
+    toastPart +
+    ` | 'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`;
 }
 
 function connect() {

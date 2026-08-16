@@ -8,6 +8,7 @@
   GET  /video       -> 注釈付きMJPEG (デバッグ確認用。ブラウザで直接開ける)
                        ?annotate=0 で枠を焼き込まない素の映像 (フロントはこちらを使う)
   POST /calib       -> 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ)
+  POST /calib/save  -> 現在の調整値をファイルへ保存 (次回起動時に自動で復元)
 
 起動:
   cd "XR_ Analyze"
@@ -25,7 +26,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import config
+from . import calib_store, config
 from .detector import Detector
 from .pipeline import Pipeline
 
@@ -100,6 +101,33 @@ async def calib(req: CalibRequest):
         f"CAM_OFFSET_X={view['offset_x']} CAM_OFFSET_Y={view['offset_y']}"
     )
     return view
+
+
+@app.post("/calib/save")
+async def calib_save():
+    """
+    現在のズーム/切り抜き位置をファイルに保存する(フロントの 's' キー)。
+
+    次回起動時に config が読み込み、初期値として復元する。環境変数
+    (CAM_ZOOM / CAM_OFFSET_*)で明示された場合はそちらが優先される。
+    """
+    if pipeline is None:
+        return JSONResponse({"status": "starting"}, status_code=503)
+    view = pipeline.view()
+    try:
+        path = calib_store.save(view["zoom"], view["offset_x"], view["offset_y"])
+    except OSError as e:
+        # 保存に失敗しても稼働中の調整値はそのまま。フロントに失敗を伝えて終わる。
+        print(f"[calib] 保存に失敗しました: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e), **view}, status_code=500
+        )
+    print(
+        f"[calib] 保存しました -> {path} "
+        f"(CAM_ZOOM={view['zoom']} CAM_OFFSET_X={view['offset_x']} "
+        f"CAM_OFFSET_Y={view['offset_y']})"
+    )
+    return {"status": "ok", "path": str(path), "file": path.name, **view}
 
 
 @app.websocket("/ws")

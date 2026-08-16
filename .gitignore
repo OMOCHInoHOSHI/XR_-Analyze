@@ -11,6 +11,10 @@ venv/
 vocab.json
 vocab_untranslated.json
 
+# カメラ合わせ込みの保存値(サーバ画面の 's' キー出力。機材・装着位置ごとに異なる)
+calib.json
+calib.json.tmp
+
 # OS
 .DS_Store
 Thumbs.db
