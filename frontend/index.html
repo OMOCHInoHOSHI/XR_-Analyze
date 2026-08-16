@@ -16,9 +16,15 @@
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
   #hud { position: absolute; top: 8px; left: 10px; font-size: 13px;
     text-shadow: 0 0 2px #000; pointer-events: none; }
-  .box { position: absolute; border: 3px solid #00ff66; box-sizing: border-box; }
+  /* 枠色は --c で持たせ、ラベル背景にも継承させる(状態で色を1箇所だけ変える)。 */
+  .box { position: absolute; border: 3px solid var(--c, #00ff66); box-sizing: border-box; }
+  /* フォーカス固定中は色を変えて通常の枠と区別する。 */
+  .box.locked { --c: #ffcc00; }
+  /* 見失い中(猶予時間内)は破線+半透明。「まだ解除されていないが追従できていない」
+     ことを示す。猶予を過ぎると自動で解除され通常の枠に戻る。 */
+  .box.lost { --c: #ffcc00; opacity: .5; border-style: dashed; }
   .label { position: absolute; transform: translateY(-100%);
-    background: #00ff66; color: #000; font-size: 28px; font-weight: 700;
+    background: var(--c, #00ff66); color: #000; font-size: 28px; font-weight: 700;
     line-height: 1.2; padding: 2px 8px; white-space: nowrap;
     font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN",
       "Yu Gothic", Meiryo, sans-serif; }
@@ -34,12 +40,16 @@
 
 <script>
 // キー操作:
+//   m → 1/2 : モード切替 (1:シングルターゲット / 2:マルチターゲット)
+//   Enter    : シングルモードでフォーカス固定/解除 (Escでも解除)
 //   d        : デバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
 //   + / = / -: デジタルズームの増減
 //   ↑↓←→    : 切り抜き位置(表示位置)の移動
 //   s        : 現在のズーム/位置を保存 (次回起動時に自動で復元)
 //   0        : ズーム・位置をリセット
 // ズーム/位置はサーバ側のカメラ切り抜きを動かすので、映像も検出枠も一緒に動く。
+// モード/フォーカス固定は「どの検出を描くか」の表示ポリシーなので、サーバに状態を
+// 増やさずこのページだけで完結させる(推論内容には影響しない)。
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
@@ -48,23 +58,58 @@ let showVideo = true;
 const STEP_ZOOM = 0.1;
 const STEP_OFFSET = 0.01;
 
+// --- モード -----------------------------------------------------------------
+// シングル: 常に1件だけ枠を出す。Enterでその1件にフォーカスを固定(ロック)する。
+// マルチ  : 信頼度の高い順に最大10件を出す(既定。従来の挙動に近い)。
+const MODE_SINGLE = "single";
+const MODE_MULTI = "multi";
+const MODE_LABEL = { single: "シングル", multi: "マルチ" };
+const MULTI_MAX = 10;
+let mode = MODE_MULTI;
+
+// 'm' を押してから数字キーを待つ2ストローク入力。数字キーは 0(リセット)が既に
+// 単独機能に使われており、1/2 도 单独にするとモード数が増えたときに衝突しやすい。
+// 'm' を前置きさせることで数字キーの空間を分け、調整中の誤爆も防ぐ。
+const MODE_PENDING_MS = 3000;  // 待ち状態の自動キャンセル
+let modePending = false;
+let modePendingTimer = null;
+
+// --- フォーカス固定 ---------------------------------------------------------
+// 検出結果にトラッキングIDが無いため、ロック対象は「最後に確定した枠」として保持し、
+// 毎フレーム IoU が最も大きい検出へ引き継ぐ(簡易追従)。これが無いと固定しても
+// 次のフレームで別の物体に選択が移ってしまう。
+const LOCK_GRACE_MS = 2000;   // 見失ってもこの間は最後の枠を残す。過ぎたら自動解除
+const LOCK_IOU_SAME = 0.1;    // 同じラベルなら緩めに一致とみなす
+const LOCK_IOU_ANY = 0.4;     // ラベルが揺れた場合は重なりを厳しく見る
+let lockBox = null;      // ロック中の枠(検出1件のコピー)。null ならロックなし
+let lockLostAt = 0;      // 見失った時刻(ms)。0 なら追従できている
+let lockGraceTimer = null;  // 猶予切れの描き直し予約(再追従できたら取り消す)
+let currentTarget = null;  // シングルモードで今表示している1件(Enterの固定対象)
+
 // 保存結果などの一時メッセージ。HUDはWS受信ごとに描き直されるため、
 // 期限(ms)を持たせて render() 側で合成する。
 let toastText = "";
 let toastUntil = 0;
 let lastPayload = null;  // 直近のWSペイロード(WS受信を待たずに描き直すため)
 
-function toast(text, ms = 2000) {
+// 新フレームが来ないと /ws は送信しない。カメラが止まっていても表示を更新できるよう、
+// 直近のペイロードで描き直す。
+function repaint() {
+  if (lastPayload) render(lastPayload);
+}
+
+// メッセージの設定だけを行う。render() の中から呼んでも再帰しないよう、
+// 描き直しを伴う toast() と分けてある。
+function setToast(text, ms = 2000) {
   toastText = text;
   toastUntil = Date.now() + ms;
-  // 新フレームが来ないと /ws は送信しないので、カメラが止まっている時でも
-  // 保存結果が見えるよう、直近のペイロードで即座に描き直す。
-  if (lastPayload) {
-    render(lastPayload);
-    setTimeout(() => {
-      if (lastPayload && Date.now() >= toastUntil) render(lastPayload);
-    }, ms + 50);  // 期限切れでメッセージを消すための描き直し
-  }
+  // 期限切れでメッセージを消すための描き直し(新フレームが来ない場合の保険)
+  setTimeout(() => { if (Date.now() >= toastUntil) repaint(); }, ms + 50);
+}
+
+function toast(text, ms = 2000) {
+  setToast(text, ms);
+  repaint();
 }
 
 // 調整はサーバに差分で投げるだけ。確定値は WS ペイロードの view で受け取るため
@@ -88,12 +133,86 @@ function saveCalib() {
     .catch(() => toast("save failed"));
 }
 
+// --- モード切替とフォーカス固定の操作 ---------------------------------------
+// ロックを解除して追従用の状態を片付ける。
+function clearLock() {
+  lockBox = null;
+  lockLostAt = 0;
+  clearTimeout(lockGraceTimer);
+}
+
+function setMode(next) {
+  mode = next;
+  // モードをまたいでロックを残すと、マルチ表示中に見えない固定状態が残るため解除する。
+  clearLock();
+  currentTarget = null;
+  toast(
+    next === MODE_MULTI
+      ? `モード: ${MODE_LABEL[next]} (最大${MULTI_MAX}件)`
+      : `モード: ${MODE_LABEL[next]} (Enterでフォーカス固定)`
+  );
+}
+
+function beginModePending() {
+  modePending = true;
+  clearTimeout(modePendingTimer);
+  modePendingTimer = setTimeout(() => { modePending = false; repaint(); }, MODE_PENDING_MS);
+  repaint();  // HUDに「1=シングル 2=マルチ」を出す
+}
+
+function endModePending() {
+  modePending = false;
+  clearTimeout(modePendingTimer);
+}
+
+function toggleLock() {
+  if (mode !== MODE_SINGLE) {
+    toast("フォーカス固定はシングルモード(m→1)のみ");
+    return;
+  }
+  if (lockBox) {
+    clearLock();
+    toast("フォーカス固定を解除");
+    return;
+  }
+  if (!currentTarget) {
+    toast("固定する対象がありません");
+    return;
+  }
+  // 押した瞬間に枠が出ている対象をそのまま固定する。
+  lockBox = { ...currentTarget };
+  lockLostAt = 0;
+  toast(`フォーカス固定: ${currentTarget.label_ja || currentTarget.label}`);
+}
+
 document.addEventListener("keydown", (e) => {
   // 修飾キー付きはブラウザ標準ショートカットなので触らない。特に macOS の
   // Cmd+0 / Cmd+= / Cmd+- (ページの拡大縮小) を拾うと、調整中の値が
   // 意図せずリセットされてしまう。
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  // 'm' の直後は数字キーだけをモード指定として解釈する。それ以外のキーは
+  // 待ち状態の取り消しにだけ使い、本来の機能は動かさない(誤爆防止)。
+  if (modePending) {
+    endModePending();
+    e.preventDefault();
+    if (e.key === "1") setMode(MODE_SINGLE);
+    else if (e.key === "2") setMode(MODE_MULTI);
+    else toast("モード切替を取り消しました");
+    return;
+  }
+
   switch (e.key) {
+    case "m":
+      beginModePending();
+      break;
+    case "Enter":
+      e.preventDefault();
+      toggleLock();
+      break;
+    case "Escape":
+      if (lockBox) { clearLock(); toast("フォーカス固定を解除"); }
+      break;
     case "d":
       showVideo = !showVideo;
       video.style.display = showVideo ? "block" : "none";
@@ -129,14 +248,85 @@ document.addEventListener("keydown", (e) => {
 
 const signed = (v) => (v < 0 ? "" : "+") + v.toFixed(2);
 
+// 2つの正規化bboxの IoU(重なり具合)。ロック対象の追従に使う。
+function iou(a, b) {
+  const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.w, b.x + b.w), y2 = Math.min(a.y + a.h, b.y + b.h);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const uni = a.w * a.h + b.w * b.h - inter;
+  return uni > 0 ? inter / uni : 0;
+}
+
+// シングルモードで表示する1件。画面中央に最も近い検出を選ぶ
+// (XRグラスでは頭を向けて対象を狙うため、中央 = 見ているもの)。
+function nearestToCenter(dets) {
+  let best = null, bestDist = Infinity;
+  for (const d of dets) {
+    const dx = d.x + d.w / 2 - 0.5, dy = d.y + d.h / 2 - 0.5;
+    const dist = dx * dx + dy * dy;
+    // 同距離なら信頼度の高い方。ちらつきの原因になる同点を残さない。
+    if (dist < bestDist || (dist === bestDist && best && d.confidence > best.confidence)) {
+      bestDist = dist;
+      best = d;
+    }
+  }
+  return best;
+}
+
+// ロック中の枠に対応する今フレームの検出を探す。ラベル一致を優先し、
+// オープン語彙モデルでラベルが揺れた場合は重なりの大きさだけで拾い直す。
+function trackLock(dets) {
+  let same = null, sameIou = 0, any = null, anyIou = 0;
+  for (const d of dets) {
+    const v = iou(d, lockBox);
+    if (d.label === lockBox.label && v > sameIou) { sameIou = v; same = d; }
+    if (v > anyIou) { anyIou = v; any = d; }
+  }
+  if (same && sameIou >= LOCK_IOU_SAME) return same;
+  if (any && anyIou >= LOCK_IOU_ANY) return any;
+  return null;
+}
+
+// 実際に描く検出のリストを決める。_state は枠の見た目("locked"/"lost")用。
+function visibleBoxes(dets) {
+  if (mode === MODE_MULTI) {
+    currentTarget = null;
+    return [...dets].sort((a, b) => b.confidence - a.confidence).slice(0, MULTI_MAX);
+  }
+
+  if (lockBox) {
+    const hit = trackLock(dets);
+    if (hit) {
+      lockBox = { ...hit };   // 追従できたので枠を更新
+      lockLostAt = 0;
+      clearTimeout(lockGraceTimer);  // 戻ってきたので猶予切れの予約は不要
+    } else if (!lockLostAt) {
+      lockLostAt = Date.now();
+      // 新フレームが来なくても猶予切れで解除されるよう、期限後の描き直しを予約する。
+      lockGraceTimer = setTimeout(repaint, LOCK_GRACE_MS + 50);
+    } else if (Date.now() - lockLostAt >= LOCK_GRACE_MS) {
+      clearLock();
+      setToast("ロック解除(対象を見失いました)");  // render 中なので描き直しはしない
+    }
+    if (lockBox) {
+      currentTarget = lockBox;
+      return [{ ...lockBox, _state: lockLostAt ? "lost" : "locked" }];
+    }
+  }
+
+  currentTarget = nearestToCenter(dets);
+  return currentTarget ? [currentTarget] : [];
+}
+
 function render(payload) {
   lastPayload = payload;
   const stage = document.getElementById("stage");
   const W = stage.clientWidth, H = stage.clientHeight;
   overlay.innerHTML = "";
-  for (const d of payload.detections) {
+  const boxes = visibleBoxes(payload.detections);
+  for (const d of boxes) {
     const box = document.createElement("div");
-    box.className = "box";
+    box.className = d._state ? `box ${d._state}` : "box";
     box.style.left = (d.x * W) + "px";
     box.style.top = (d.y * H) + "px";
     box.style.width = (d.w * W) + "px";
@@ -145,7 +335,9 @@ function render(payload) {
     label.className = "label";
     // 日本語表示名(label_ja)を優先。無ければ英語ラベル。
     const name = d.label_ja || d.label;
-    label.textContent = `${name} ${(d.confidence * 100) | 0}%`;
+    const mark = d._state === "locked" ? " [固定]"
+      : d._state === "lost" ? " [見失い]" : "";
+    label.textContent = `${name} ${(d.confidence * 100) | 0}%${mark}`;
     box.appendChild(label);
     overlay.appendChild(box);
   }
@@ -153,11 +345,18 @@ function render(payload) {
   const calibText = v
     ? ` | zoom ${v.zoom.toFixed(2)} off(${signed(v.offset_x)},${signed(v.offset_y)})`
     : "";
+  const lockText = mode === MODE_SINGLE && lockBox
+    ? (lockLostAt ? "/見失い" : "/固定中") : "";
+  const modeText = ` | mode ${MODE_LABEL[mode]}${lockText}`;
+  const pendingPart = modePending ? " | モード選択: 1=シングル 2=マルチ" : "";
   const toastPart = Date.now() < toastUntil ? ` | ${toastText}` : "";
+  const hint = mode === MODE_SINGLE
+    ? ` | m→1/2:モード  Enter:固定/解除  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`
+    : ` | m→1/2:モード  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`;
+  // 表示は絞っても objects は検出総数を出す(絞り込みで見えていない数が分かる)。
   hud.textContent =
-    `fps ${payload.fps} | objects ${payload.detections.length}${calibText}` +
-    toastPart +
-    ` | 'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`;
+    `fps ${payload.fps} | objects ${payload.detections.length}` +
+    `${calibText}${modeText}${pendingPart}${toastPart}${hint}`;
 }
 
 function connect() {
