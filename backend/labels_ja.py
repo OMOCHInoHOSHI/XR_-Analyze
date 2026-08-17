@@ -164,7 +164,7 @@ def _load_machine_dict() -> dict[str, str]:
 
 # 統合辞書(後勝ち=後ろほど優先):
 #   機械翻訳(ja_vocab) < LVIS < COCO < 手動(EXTRA)
-# 同音異義などで機械翻訳が外しやすい語は、キュレーション辞書が上書きする。
+# (理由: docs/adr/0003-label-localization.md)
 _TABLE: dict[str, str] = {
     **_load_machine_dict(),
     **LVIS_JA,

@@ -89,8 +89,7 @@ async def calib(req: CalibRequest):
     """
     稼働中にカメラのデジタルズーム/切り抜き位置を調整する(グラスの視界合わせ用)。
 
-    フロント(frontend/index.html)のキー操作から呼ばれる。差分で受けてクランプ後の
-    確定値を返すので、フロントは自前で値を持たずサーバの値をそのまま表示できる。
+    差分で受けクランプ後の確定値を返す設計の理由: docs/adr/0010-client-side-display-policy.md
     """
     if pipeline is None:
         return JSONResponse({"status": "starting"}, status_code=503)
@@ -181,9 +180,7 @@ async def video(annotate: bool = True):
     """
     注釈付きMJPEG。`?annotate=0` で枠・ラベルを焼き込まない素の映像になる。
 
-    フロント(frontend/index.html)は annotate=0 で読む。HTML側で枠を重ねて描くため、
-    焼き込みも有効だと枠が二重になり、さらに 'd' で映像を消したときに焼き込んだ枠だけ
-    が一緒に消えて紛らわしいため。日本語ラベルの描画コストも省ける。
+    フロントは annotate=0 で読む (理由: docs/adr/0002-detection-streaming-contract.md)
     """
     return StreamingResponse(
         _mjpeg_generator(annotate),

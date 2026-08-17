@@ -60,10 +60,8 @@ def max_offset_for(zoom: float) -> float:
     """
     指定倍率で切り抜き中心をずらせる上限(全体比)。
 
-    中央クロップの切り抜きサイズは全体の 1/zoom なので、片側の余白は
-    全体比で (1 - 1/zoom) / 2 = (zoom - 1) / (2 * zoom) となる。
-    これを超えて中心をずらしても crop_zoom 側でクランプされ映像は動かない。
-    zoom <= 1.0 では切り抜きサイズが全体と同じ(またはそれ以上)になり余白がないため 0.0。
+    片側の余白 = (1 - 1/zoom) / 2 = (zoom - 1) / (2 * zoom)。zoom <= 1.0 は 0.0。
+    (理由: docs/adr/0007-viewport-crop-calibration.md)
     """
     if zoom <= 1.0:
         return 0.0
@@ -74,12 +72,8 @@ def clamp_view(zoom: float, offset_x: float, offset_y: float) -> tuple[float, fl
     """
     ズーム倍率とオフセットを実効範囲に丸め、(zoom, offset_x, offset_y) を返す。
 
-    crop_zoom は幾何的にオフセットをクランプするため、実効範囲を超えた生の値を
-    保持し続けると HUD 表示や確定値が実際の見た目とズレる。ズームを変えると
-    実効範囲そのものが変わるので、値を更新するたびに三つまとめて通す。
-
-    末尾の `+ 0.0` は -0.0 を 0.0 に正規化する。max(-0.0, 0.0) は -0.0 を返すため、
-    zoom=1.0 (limit=0) のとき表示が "-0.0" になるのを防ぐ。
+    三つまとめてクランプし直し、-0.0 を 0.0 に正規化する
+    (理由: docs/adr/0007-viewport-crop-calibration.md)
     """
     zoom = round(max(1.0, zoom), 4)
     limit = max_offset_for(zoom)
@@ -92,8 +86,7 @@ def crop_zoom(frame, zoom: float, offset_x: float, offset_y: float):
     """
     中央クロップでデジタルズームする。offset は全体比の正規化値で中心をずらす。
 
-    リサイズはしない: IMG_SIZE でどのみち縮小されるため不要な処理コストであり、
-    切り抜くほど残った被写体の実効解像度はむしろ上がるため。
+    設計判断 (リサイズしない理由など): docs/adr/0007-viewport-crop-calibration.md
     """
     # 1.0未満は元々仕様上無効(config と同じクランプ規則)。ここで揃えておくことで
     # zoom=0.0 のような値が来ても int(w / zoom) のゼロ除算を起こさない。
@@ -150,10 +143,7 @@ class Camera:
         self.height = height
         self.fps = fps
         self._flip_code = flip_code_for(flip)
-        # 普通の公開属性として保持: check_camera / サーバの /calib が実行中に
-        # 書き換えられるようにするため。書き換えるのは常に単一の呼び出し元
-        # (check_camera のキー処理、またはリクエストハンドラ) で、読取スレッドは
-        # 参照するだけなのでロックは不要。
+        # 公開属性として保持: 書き手は単一の呼び出し元のみなのでロック不要 (理由: docs/adr/0006-single-background-pipeline.md)
         self.zoom, self.offset_x, self.offset_y = clamp_view(zoom, offset_x, offset_y)
         self._cap: Optional[cv2.VideoCapture] = None
         self._out_size: Optional[tuple[int, int]] = None  # 直近read()の実サイズ(w,h)
@@ -182,10 +172,7 @@ class Camera:
         # read() が self._cap を使うため、ウォームアップの前に代入しておく。
         self._cap = cap
 
-        # 1枚読めるまで軽くウォームアップ。self.read() を使うのは、生の
-        # cap.read() だと flip/crop を経由せず _out_size が未設定のままになり、
-        # open() 完了直後に actual_size を参照するとクロップ前の生サイズが
-        # 返ってしまう(source_size が実態と一致しない)ため。
+        # 1枚読めるまで self.read() でウォームアップする (理由: docs/adr/0007-viewport-crop-calibration.md)
         for _ in range(5):
             ok, _frame = self.read()
             if ok:
@@ -198,9 +185,7 @@ class Camera:
             raise RuntimeError("open() を先に呼んでください。")
         ok, frame = self._cap.read()
         if ok and frame is not None:
-            # flipを先に、cropを後に適用する: 画面に表示された向きを基準に
-            # オフセットが効くようにするため。これにより逆さ付けカメラでも
-            # 「画面上の右 = +x」となり直感と一致する。
+            # flipを先に、cropを後に適用する (理由: docs/adr/0007-viewport-crop-calibration.md)
             if self._flip_code is not None:
                 frame = cv2.flip(frame, self._flip_code)
             frame = crop_zoom(frame, self.zoom, self.offset_x, self.offset_y)

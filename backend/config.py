@@ -33,8 +33,7 @@ def _float_view(name: str, saved_key: str, default: float) -> float:
     """
     調整値を「環境変数 > 保存ファイル(calib.json) > 既定値」の優先順位で読む。
 
-    明示指定を最優先にするのは CAM_INDEX と同じ方針。保存済みの値があっても
-    `CAM_ZOOM=1.5 python3 -m backend.server` のような一時的な上書きが効く。
+    明示指定を最優先にする方針の詳細: docs/adr/0004-config-resolution-order.md
     """
     raw = os.environ.get(name, "").strip()
     if raw:
@@ -52,8 +51,7 @@ def _float_view(name: str, saved_key: str, default: float) -> float:
 #   2. CAM_NAME に名前 -> その名前を含むカメラを自動で探して使う (既定: InnoMaker)
 #   3. どちらも解決できなければ index 0
 #
-# MacBook Air では内蔵カメラが index 0、外付けInnoMakerは通常 index 1。
-# 既定で CAM_NAME="Innomaker" にしてあるので、名前一致で外付けを狙い撃ちする。
+# 既定で CAM_NAME="Innomaker" にしてあるのは外付けカメラを狙い撃ちするため (理由: docs/adr/0005-camera-selection.md)
 # CAM_INDEX_ENV が None = 環境変数で明示されていない、を意味する。
 CAM_INDEX_ENV: int | None = (
     int(os.environ["CAM_INDEX"]) if os.environ.get("CAM_INDEX", "").strip().isdigit()
@@ -72,7 +70,7 @@ CAM_FPS: int = _int("CAM_FPS", 30)
 #   "v"    : 上下のみ反転
 #   "h"    : 左右のみ反転(鏡像)
 #   "none" : 補正しない
-# 反転はカメラ読取の時点で行うため、推論・MJPEG映像・検出座標はすべて同じ向きになる。
+# 反転はカメラ読取の時点で行う (理由: docs/adr/0007-viewport-crop-calibration.md)
 CAM_FLIP: str = os.environ.get("CAM_FLIP", "180").strip().lower()
 
 # デジタルズーム倍率。1.0で等倍(クロップなし)。1.5なら幅・高さを1/1.5に中央クロップする。
@@ -80,8 +78,7 @@ CAM_FLIP: str = os.environ.get("CAM_FLIP", "180").strip().lower()
 CAM_ZOOM: float = max(1.0, _float_view("CAM_ZOOM", "zoom", 1.0))
 
 # 切り抜き中心のオフセット。フレーム全体の幅/高さに対する正規化値
-# (「残り余白に対する比率」ではなく全体比にすることで、ズーム倍率を変えても
-#  オフセットの意味が変わらず、調整をやり直さずに済む)。
+# (全体比にする理由: docs/adr/0007-viewport-crop-calibration.md)
 # 0.1 = フレーム幅の10%ぶん右へ、-0.1 = 10%ぶん左へ。yは+で下へ。
 CAM_OFFSET_X: float = _float_view("CAM_OFFSET_X", "offset_x", 0.0)
 CAM_OFFSET_Y: float = _float_view("CAM_OFFSET_Y", "offset_y", 0.0)
@@ -126,9 +123,7 @@ def _auto_device() -> str:
     推論デバイスを決める。
     優先順位: 環境変数 DEVICE > Apple Silicon の MPS > CUDA(NVIDIA GPU) > CPU。
 
-    Apple(Apple Silicon Mac)では MPS(GPU)を自動で有効化する。
-    DEVICE 環境変数が指定されていればそれを最優先で使う。
-    torch が未インストールでも config を読めるよう、import は try で保護する。
+    詳細 (import 保護など): docs/adr/0009-inference-device-selection.md
     """
     env = os.environ.get("DEVICE", "").strip()
     if env:

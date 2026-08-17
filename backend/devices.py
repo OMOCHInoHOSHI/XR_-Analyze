@@ -5,10 +5,8 @@ OpenCV はカメラを整数 index でしか開けず、名前で直接は選べ
 そこで OS から取得したカメラ名の並び順を、OpenCV の index に対応させる。
 
 重要(macOS):
-  OpenCV(CAP_AVFOUNDATION)の index は `AVCaptureDevice` のデバイス順に対応する。
-  一方 `system_profiler` の並び順はこれと**一致しない**ことがある(実機で逆順を確認)。
-  そのため名前解決には PyObjC 経由の AVFoundation 列挙を使い、OpenCV と同じ
-  並び順の名前を得る。これが使えない場合は名前解決を諦め、CAM_INDEX 明示に委ねる。
+  AVFoundation(PyObjC) で OpenCV と同じ並び順の名前を得る。未導入・失敗時は
+  名前解決を諦め CAM_INDEX 明示に委ねる (理由: docs/adr/0005-camera-selection.md)
 
   - 必要パッケージ: pyobjc-framework-AVFoundation (requirements.txt に追加済み)
   - 未導入時は list_camera_names() が空を返し、resolve_index_by_name() は None。

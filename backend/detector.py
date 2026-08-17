@@ -1,8 +1,7 @@
 """
 YOLO による物体検出。
 
-出力はクライアント非依存(Web / Unity / Android のどれでも読める)。
-座標は 0.0-1.0 の正規化値で返すので、表示側の解像度に依存しない。
+出力はクライアント非依存、座標は正規化値 (理由: docs/adr/0002-detection-streaming-contract.md)
 """
 from __future__ import annotations
 

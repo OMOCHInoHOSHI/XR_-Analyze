@@ -79,9 +79,7 @@
   /* 見失い中(猶予時間内)は破線+半透明。「まだ解除されていないが追従できていない」
      ことを示す。猶予を過ぎると自動で解除され通常の枠に戻る。 */
   .box.lost { --c: var(--c-lost); opacity: .5; border-style: dashed; }
-  /* 色は --c を「使う側の要素」で直接参照する。中間変数(--label-bg 等)に
-     var(--c) を入れて #stage で定義すると、その時点で値が確定して継承されるため、
-     .box.locked が --c を上書きしてもラベルだけ色が変わらなくなる。 */
+  /* 色は --c を「使う側の要素」で直接参照する (理由: docs/adr/0014-box-theme-and-dom-reuse.md) */
   .label { position: absolute; transform: translateY(-100%);
     background: var(--c); color: #000;
     font-size: 28px; font-weight: 700;
@@ -336,8 +334,7 @@
 //   0        : ズーム・位置をリセット
 //   1〜6     : 枠の意匠(デザイン)を切替 ※デバッグ用。意匠決定後に削除する
 // ズーム/位置はサーバ側のカメラ切り抜きを動かすので、映像も検出枠も一緒に動く。
-// モード/フォーカス固定は「どの検出を描くか」の表示ポリシーなので、サーバに状態を
-// 増やさずこのページだけで完結させる(推論内容には影響しない)。
+// モード/フォーカス固定はこのページだけで完結させる (理由: docs/adr/0010-client-side-display-policy.md)
 const stage = document.getElementById("stage");
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
@@ -361,17 +358,14 @@ const MODE_LABEL = { single: "単体鑑定", multi: "広域鑑定" };
 const MULTI_MAX = 10;
 let mode = MODE_MULTI;
 
-// 'm' を押してから数字キーを待つ2ストローク入力。数字キーは 0(リセット)が既に
-// 単独機能に使われており、1/2 も単独にするとモード数が増えたときに衝突しやすい。
-// 'm' を前置きさせることで数字キーの空間を分け、調整中の誤爆も防ぐ。
+// 'm' を押してから数字キーを待つ2ストローク入力 (理由: docs/adr/0015-key-binding-policy.md)
 const MODE_PENDING_MS = 3000;  // 待ち状態の自動キャンセル
 let modePending = false;
 let modePendingTimer = null;
 
 // --- [DEBUG] 意匠(デザイン)の切り替え ---------------------------------------
-// 枠の見た目の候補を数字キーで見比べるための暫定機能。意匠が決まったら
-// この節と keydown の default 節、HUD の themePart を消せば元に戻る。
-// 'm' の待ち状態が先に処理されるため、m→1/2 のモード切替とは衝突しない。
+// 枠の見た目候補を見比べる暫定機能。意匠決定後は本節・default節・themePartを削除
+// (理由: docs/adr/0014-box-theme-and-dom-reuse.md)
 const DEBUG_THEME_KEYS = true;
 const THEMES = [
   { key: "1", id: "arcane", name: "壱:蒼の走査" },
@@ -381,7 +375,7 @@ const THEMES = [
   { key: "5", id: "ring", name: "伍:白環の銘板" },
   { key: "6", id: "azure", name: "六:蒼環の菱標" },
 ];
-// 採用する意匠。id で指すのは、キー割り当てや並びを変えても既定がずれないため。
+// 採用する意匠。id で指す (理由: docs/adr/0014-box-theme-and-dom-reuse.md)
 const DEFAULT_THEME_ID = "azure";   // 六: 蒼環の菱標
 let themeIndex = Math.max(0, THEMES.findIndex((t) => t.id === DEFAULT_THEME_ID));
 function setTheme(i) {
@@ -394,9 +388,7 @@ if (DEBUG_THEME_KEYS) stage.dataset.theme = THEMES[themeIndex].id;
 // --- [DEBUG] ここまで -------------------------------------------------------
 
 // --- フォーカス固定 ---------------------------------------------------------
-// 検出結果にトラッキングIDが無いため、ロック対象は「最後に確定した枠」として保持し、
-// 毎フレーム IoU が最も大きい検出へ引き継ぐ(簡易追従)。これが無いと固定しても
-// 次のフレームで別の物体に選択が移ってしまう。
+// トラッキングIDが無いため、毎フレーム IoU で簡易追従する (理由: docs/adr/0012-lock-tracking-by-iou.md)
 const LOCK_GRACE_MS = 2000;   // 見失ってもこの間は最後の枠を残す。過ぎたら自動解除
 const LOCK_IOU_SAME = 0.1;    // 同じラベルなら緩めに一致とみなす
 const LOCK_IOU_ANY = 0.4;     // ラベルが揺れた場合は重なりを厳しく見る
@@ -411,8 +403,7 @@ let toastText = "";
 let toastUntil = 0;
 let lastPayload = null;  // 直近のWSペイロード(WS受信を待たずに描き直すため)
 
-// 新フレームが来ないと /ws は送信しない。カメラが止まっていても表示を更新できるよう、
-// 直近のペイロードで描き直す。
+// 新フレームが来ないと /ws は送信しないため、直近のペイロードで描き直す (理由: docs/adr/0010-client-side-display-policy.md)
 function repaint() {
   if (lastPayload) render(lastPayload);
 }
@@ -431,8 +422,7 @@ function toast(text, ms = 2000) {
   repaint();
 }
 
-// 調整はサーバに差分で投げるだけ。確定値は WS ペイロードの view で受け取るため
-// ここでは状態を持たない(クランプ後の実値とHUD表示が必ず一致する)。
+// 調整はサーバに差分で投げるだけで、確定値は WS ペイロードの view で受け取る (理由: docs/adr/0010-client-side-display-policy.md)
 function calib(body) {
   fetch("/calib", {
     method: "POST",
@@ -505,13 +495,10 @@ function toggleLock() {
 }
 
 document.addEventListener("keydown", (e) => {
-  // 修飾キー付きはブラウザ標準ショートカットなので触らない。特に macOS の
-  // Cmd+0 / Cmd+= / Cmd+- (ページの拡大縮小) を拾うと、調整中の値が
-  // 意図せずリセットされてしまう。
+  // 修飾キー付きはブラウザ標準ショートカットなので触らない (理由: docs/adr/0015-key-binding-policy.md)
   if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-  // 'm' の直後は数字キーだけをモード指定として解釈する。それ以外のキーは
-  // 待ち状態の取り消しにだけ使い、本来の機能は動かさない(誤爆防止)。
+  // 'm' の直後は数字キーだけをモード指定として解釈する (理由: docs/adr/0015-key-binding-policy.md)
   if (modePending) {
     endModePending();
     e.preventDefault();
@@ -582,11 +569,8 @@ function iou(a, b) {
   return uni > 0 ? inter / uni : 0;
 }
 
-// 映像が実際に占める矩形(レターボックスを除いた領域)。#video は
-// object-fit:contain なので、ウィンドウが映像と同じ縦横比でないと上下または
-// 左右に帯が付く。枠を stage 全体に対して配置すると、この帯のぶんだけ枠が
-// 映像からズレる(1440x900 で最大36px、正方形に近いウィンドウで175px)。
-// 映像OFF(AR表示)でも同じ矩形を使う。実世界に対する枠の縦横比を保つため。
+// 映像が実際に占める矩形(レターボックスを除いた領域)。枠はこの矩形基準で配置する
+// (理由・実測値: docs/adr/0013-overlay-coordinate-basis.md)
 function viewRect() {
   const W = stage.clientWidth, H = stage.clientHeight;
   const s = lastPayload && lastPayload.source_size;
@@ -596,17 +580,15 @@ function viewRect() {
   return { x: (W - vw) / 2, y: (H - vh) / 2, w: vw, h: vh };
 }
 
-// 画面中心からの距離を「表示ピクセル」で測る。正規化座標(0-1)のまま
-// dx*dx + dy*dy で測ると、16:9 では x の1単位=幅・y の1単位=高さなので
-// 横方向のズレが 1.78 倍過小評価され、画面端の物体が中央脇の物体に勝つ。
+// 画面中心からの距離を「表示ピクセル」で測る (理由: docs/adr/0011-gaze-target-selection.md)
 function centerDistPx(d, r) {
   const dx = (d.x + d.w / 2 - 0.5) * r.w;
   const dy = (d.y + d.h / 2 - 0.5) * r.h;
   return Math.hypot(dx, dy);
 }
 
-// 照準に入らなかった場合に拾う範囲。表示領域の短辺に対する比。
-// これが無いと、中央に何も無いとき視界の隅の物体が必ず選ばれてしまう。
+// 照準に入らなかった場合に拾う範囲。表示領域の短辺に対する比
+// (理由: docs/adr/0011-gaze-target-selection.md)
 const GAZE_RADIUS = 0.25;
 
 // 単体鑑定で表示する1件 = 「今見ているもの」。
@@ -636,8 +618,8 @@ function gazeTarget(dets, r) {
   return best;
 }
 
-// ロック中の枠に対応する今フレームの検出を探す。ラベル一致を優先し、
-// オープン語彙モデルでラベルが揺れた場合は重なりの大きさだけで拾い直す。
+// ロック中の枠に対応する検出を探す。ラベル一致を優先し、揺れたら重なりで拾い直す
+// (理由: docs/adr/0012-lock-tracking-by-iou.md)
 function trackLock(dets) {
   let same = null, sameIou = 0, any = null, anyIou = 0;
   for (const d of dets) {
@@ -682,12 +664,10 @@ function visibleBoxes(dets, r) {
   return currentTarget ? [currentTarget] : [];
 }
 
-// 枠の要素は作り直さず使い回す。毎フレーム DOM を捨てて作ると走査線や円陣の
-// CSSアニメーションが常に先頭へ巻き戻り、まったく進まなくなるため。
+// 枠の要素は作り直さず使い回す (理由: docs/adr/0014-box-theme-and-dom-reuse.md)
 // 子要素は [label, d1, d2] の順で固定し、余った枠は display:none で隠す。
-// なお使い回すのは「n番目の枠」であって物体ではない。広域鑑定では毎フレーム
-// 信頼度順に並べ替えるため、同じスロットが別の物体を指すことがある(アニメーションの
-// 位相が物体に紐づくのは単体鑑定/固定中だけ)。表示自体はどちらでも壊れない。
+// 使い回すのは「n番目の枠」であって物体ではないため、広域鑑定では同じスロットが
+// 別の物体を指すことがある(表示自体はどちらでも壊れない)。
 const boxPool = [];
 function boxAt(i) {
   if (boxPool[i]) return boxPool[i];
@@ -731,8 +711,7 @@ function render(payload) {
     boxPool[i].style.display = "none";
   }
   // --- 鑑定盤 ---
-  // 状態は「今どう見ているか」を1語で出す。固定の有無は単体鑑定でしか意味を
-  // 持たないので、広域鑑定では走査中であることだけを示す。
+  // 状態は「今どう見ているか」を1語で出す (理由: docs/adr/0010-client-side-display-policy.md)
   pState.textContent = mode === MODE_MULTI ? "広域走査"
     : lockBox ? (lockLostAt ? "見失い" : "固定") : "走査中";
   pModeName.textContent = MODE_LABEL[mode];

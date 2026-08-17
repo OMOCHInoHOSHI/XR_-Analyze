@@ -1,9 +1,8 @@
 """
 ライブ調整値(ズーム/切り抜き位置)の永続化。
 
-サーバ稼働中にグラスへ合わせ込んだ値をJSONに保存し、次回起動時の初期値として
-読み込む。読み込みは config.py が行い、環境変数(CAM_ZOOM 等)で明示された項目は
-そちらが優先される。つまり保存値は「明示指定が無いときの既定値」として働く。
+サーバ稼働中にグラスへ合わせ込んだ値をJSONに保存し、次回起動時の初期値として読み込む。
+読込・優先順位の詳細: docs/adr/0008-calibration-persistence.md, docs/adr/0004-config-resolution-order.md
 
 保存先: 既定はプロジェクトルートの calib.json (環境変数 CALIB_FILE で変更可)。
 """
@@ -15,8 +14,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# backend/ の親 = プロジェクトルート。カレントディレクトリに依存しないよう
-# __file__ 基準で決める(どこから起動しても同じファイルを読み書きするため)。
+# backend/ の親 = プロジェクトルート。__file__ 基準でパスを決める (理由: docs/adr/0008-calibration-persistence.md)
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "calib.json"
 
 # 保存/読込するキー。view() の戻り値と同じ名前で揃えてある。
@@ -33,8 +31,7 @@ def load(path: Optional[Path] = None) -> dict[str, float]:
     """
     保存済みの調整値を読む。戻り値は zoom/offset_x/offset_y のうち有効だったものだけ。
 
-    ファイルが無い・壊れている場合でも起動を止めない(空dictを返す)。合わせ込みは
-    やり直せる一方、ここで例外を上げるとサーバが起動しなくなるため。
+    ファイルが無い・壊れている場合でも起動を止めない(空dictを返す) (理由: docs/adr/0008-calibration-persistence.md)
     """
     p = calib_path() if path is None else Path(path)
     try:
@@ -65,9 +62,7 @@ def save(
     """
     調整値を保存し、書き込んだパスを返す。
 
-    一時ファイルへ書いてから os.replace で差し替える。途中で落ちても壊れたJSONが
-    残らず、次回起動が「読めないファイル」で既定値に戻ってしまう事故を防ぐ。
-    (os.replace は同一ディレクトリ内ならアトミック)
+    一時ファイルへ書いてから os.replace でアトミックに差し替える (理由: docs/adr/0008-calibration-persistence.md)
     """
     p = calib_path() if path is None else Path(path)
     payload = {
