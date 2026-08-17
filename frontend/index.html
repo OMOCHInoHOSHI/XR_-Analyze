@@ -25,8 +25,42 @@
   #video { position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: contain; display: block; }
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
-  #hud { position: absolute; top: 8px; left: 10px; font-size: 13px;
-    text-shadow: 0 0 2px #000; pointer-events: none; color: var(--c); }
+
+  /* --- 鑑定盤 (モード表示と鑑定法の選択) ---
+     色(--c)と書体(--face)は意匠から受け取るので、盤も意匠に合わせて変わる。
+     鑑定盤とデバッグ行は #ui の通常フローに積む。盤の高さは選択肢の開閉で
+     変わるため、デバッグ行を絶対配置にすると重なってしまう。 */
+  #ui { position: absolute; top: 8px; left: 10px; pointer-events: none; }
+  #panel { position: relative; display: inline-block;
+    background: rgba(0, 14, 22, .55); color: var(--c);
+    border: 1px solid var(--c); padding: 5px 14px 6px;
+    font-family: var(--face); font-size: 15px; line-height: 1.5;
+    letter-spacing: .12em; }
+  .p-deco { position: absolute; inset: 0; }
+  /* 四隅の菱形。意匠 六 の環まわりのあしらいと揃える。 */
+  #panel::before, #panel::after, .p-deco::before, .p-deco::after {
+    content: ""; position: absolute; width: 7px; height: 7px;
+    background: var(--c); transform: translate(-50%, -50%) rotate(45deg); }
+  #panel::before { left: 0; top: 0; }
+  #panel::after { left: 100%; top: 0; }
+  .p-deco::before { left: 0; top: 100%; }
+  .p-deco::after { left: 100%; top: 100%; }
+  .p-head { display: flex; gap: 20px; justify-content: space-between;
+    border-bottom: 1px solid rgba(255, 255, 255, .18);
+    margin-bottom: 3px; padding-bottom: 2px; }
+  .p-title { font-weight: 700; }
+  .p-key { opacity: .6; margin-right: 12px; }
+  #p-modename::before { content: "◇ "; }
+  /* 'm' を押している間だけ開く。既定は閉じたまま。 */
+  .p-opts { display: none; margin-top: 3px; }
+  .p-opt { white-space: nowrap; }
+  .p-num { display: inline-block; min-width: 2.6em; }
+  .p-num::before { content: "◇ "; }
+  .p-msg { display: none; margin-top: 3px; opacity: .9; }
+  /* デバッグ行(fps・調整値・意匠・キー一覧)。盤の下に小さく置く。 */
+  #hud { margin-top: 6px; font-size: 12px; opacity: .75; color: var(--c);
+    text-shadow: 0 0 2px #000; letter-spacing: 0;
+    font-family: -apple-system, "Helvetica Neue", sans-serif; }
 
   /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
   .box { position: absolute; box-sizing: border-box;
@@ -262,13 +296,29 @@
   <!-- annotate=0: 枠とラベルはこのページ側(#overlay)で描くため、映像には焼き込ませない -->
   <img id="video" src="/video?annotate=0" alt="debug video" />
   <div id="overlay"></div>
-  <div id="hud">connecting…</div>
+  <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
+       (検出名を扱うため innerHTML は使わない)。 -->
+  <div id="ui">
+    <div id="panel">
+      <i class="p-deco"></i>
+      <div class="p-head">
+        <span class="p-title">鑑 定 眼</span><span id="p-state">待機</span>
+      </div>
+      <div><span class="p-key">鑑定法</span><span id="p-modename">広域鑑定</span></div>
+      <div class="p-opts" id="p-opts">
+        <div class="p-opt"><span class="p-num">壱</span>単体鑑定</div>
+        <div class="p-opt"><span class="p-num">弐</span>広域鑑定</div>
+      </div>
+      <div class="p-msg" id="p-msg"></div>
+    </div>
+    <div id="hud">connecting…</div>
+  </div>
 </div>
 
 <script>
 // キー操作:
-//   m → 1/2 : モード切替 (1:シングルターゲット / 2:マルチターゲット)
-//   Enter    : シングルモードでフォーカス固定/解除 (Escでも解除)
+//   m → 1/2 : 鑑定法の切替 (1:単体鑑定 / 2:広域鑑定)
+//   Enter    : 単体鑑定で鑑定を固定/解除 (Escでも解除)
 //   d        : デバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
 //   + / = / -: デジタルズームの増減
 //   ↑↓←→    : 切り抜き位置(表示位置)の移動
@@ -282,17 +332,21 @@ const stage = document.getElementById("stage");
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
+const pState = document.getElementById("p-state");
+const pModeName = document.getElementById("p-modename");
+const pOpts = document.getElementById("p-opts");
+const pMsg = document.getElementById("p-msg");
 let showVideo = true;
 
 const STEP_ZOOM = 0.1;
 const STEP_OFFSET = 0.01;
 
 // --- モード -----------------------------------------------------------------
-// シングル: 常に1件だけ枠を出す。Enterでその1件にフォーカスを固定(ロック)する。
-// マルチ  : 信頼度の高い順に最大10件を出す(既定。従来の挙動に近い)。
+// 単体鑑定: 常に1件だけ枠を出す。Enterでその1件にフォーカスを固定(ロック)する。
+// 広域鑑定: 信頼度の高い順に最大10件を出す(既定。従来の挙動に近い)。
 const MODE_SINGLE = "single";
 const MODE_MULTI = "multi";
-const MODE_LABEL = { single: "シングル", multi: "マルチ" };
+const MODE_LABEL = { single: "単体鑑定", multi: "広域鑑定" };
 const MULTI_MAX = 10;
 let mode = MODE_MULTI;
 
@@ -316,7 +370,9 @@ const THEMES = [
   { key: "5", id: "ring", name: "伍:白環の銘板" },
   { key: "6", id: "azure", name: "六:蒼環の菱標" },
 ];
-let themeIndex = 0;
+// 採用する意匠。id で指すのは、キー割り当てや並びを変えても既定がずれないため。
+const DEFAULT_THEME_ID = "azure";   // 六: 蒼環の菱標
+let themeIndex = Math.max(0, THEMES.findIndex((t) => t.id === DEFAULT_THEME_ID));
 function setTheme(i) {
   themeIndex = i;
   stage.dataset.theme = THEMES[i].id;
@@ -336,7 +392,7 @@ const LOCK_IOU_ANY = 0.4;     // ラベルが揺れた場合は重なりを厳�
 let lockBox = null;      // ロック中の枠(検出1件のコピー)。null ならロックなし
 let lockLostAt = 0;      // 見失った時刻(ms)。0 なら追従できている
 let lockGraceTimer = null;  // 猶予切れの描き直し予約(再追従できたら取り消す)
-let currentTarget = null;  // シングルモードで今表示している1件(Enterの固定対象)
+let currentTarget = null;  // 単体鑑定で今表示している1件(Enterの固定対象)
 
 // 保存結果などの一時メッセージ。HUDはWS受信ごとに描き直されるため、
 // 期限(ms)を持たせて render() 側で合成する。
@@ -395,13 +451,13 @@ function clearLock() {
 
 function setMode(next) {
   mode = next;
-  // モードをまたいでロックを残すと、マルチ表示中に見えない固定状態が残るため解除する。
+  // 鑑定法をまたいでロックを残すと、広域鑑定中に見えない固定状態が残るため解除する。
   clearLock();
   currentTarget = null;
   toast(
     next === MODE_MULTI
-      ? `モード: ${MODE_LABEL[next]} (最大${MULTI_MAX}件)`
-      : `モード: ${MODE_LABEL[next]} (Enterでフォーカス固定)`
+      ? `${MODE_LABEL[next]} ── 最大${MULTI_MAX}件`
+      : `${MODE_LABEL[next]} ── Enterで鑑定を固定`
   );
 }
 
@@ -409,7 +465,7 @@ function beginModePending() {
   modePending = true;
   clearTimeout(modePendingTimer);
   modePendingTimer = setTimeout(() => { modePending = false; repaint(); }, MODE_PENDING_MS);
-  repaint();  // HUDに「1=シングル 2=マルチ」を出す
+  repaint();  // 鑑定盤に「壱/弐」の選択肢を開く
 }
 
 function endModePending() {
@@ -419,12 +475,12 @@ function endModePending() {
 
 function toggleLock() {
   if (mode !== MODE_SINGLE) {
-    toast("フォーカス固定はシングルモード(m→1)のみ");
+    toast("鑑定の固定は単体鑑定(m→1)のみ");
     return;
   }
   if (lockBox) {
     clearLock();
-    toast("フォーカス固定を解除");
+    toast("鑑定の固定を解除");
     return;
   }
   if (!currentTarget) {
@@ -434,7 +490,7 @@ function toggleLock() {
   // 押した瞬間に枠が出ている対象をそのまま固定する。
   lockBox = { ...currentTarget };
   lockLostAt = 0;
-  toast(`フォーカス固定: ${currentTarget.label_ja || currentTarget.label}`);
+  toast(`鑑定を固定 ── ${currentTarget.label_ja || currentTarget.label}`);
 }
 
 document.addEventListener("keydown", (e) => {
@@ -450,7 +506,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (e.key === "1") setMode(MODE_SINGLE);
     else if (e.key === "2") setMode(MODE_MULTI);
-    else toast("モード切替を取り消しました");
+    else toast("鑑定法の選択を取り消しました");
     return;
   }
 
@@ -515,7 +571,7 @@ function iou(a, b) {
   return uni > 0 ? inter / uni : 0;
 }
 
-// シングルモードで表示する1件。画面中央に最も近い検出を選ぶ
+// 単体鑑定で表示する1件。画面中央に最も近い検出を選ぶ
 // (XRグラスでは頭を向けて対象を狙うため、中央 = 見ているもの)。
 function nearestToCenter(dets) {
   let best = null, bestDist = Infinity;
@@ -564,7 +620,8 @@ function visibleBoxes(dets) {
       lockGraceTimer = setTimeout(repaint, LOCK_GRACE_MS + 50);
     } else if (Date.now() - lockLostAt >= LOCK_GRACE_MS) {
       clearLock();
-      setToast("ロック解除(対象を見失いました)");  // render 中なので描き直しはしない
+      // render 中なので描き直しはしない
+      setToast("固定を解除 ── 対象を見失いました");
     }
     if (lockBox) {
       currentTarget = lockBox;
@@ -579,9 +636,9 @@ function visibleBoxes(dets) {
 // 枠の要素は作り直さず使い回す。毎フレーム DOM を捨てて作ると走査線や円陣の
 // CSSアニメーションが常に先頭へ巻き戻り、まったく進まなくなるため。
 // 子要素は [label, d1, d2] の順で固定し、余った枠は display:none で隠す。
-// なお使い回すのは「n番目の枠」であって物体ではない。マルチモードでは毎フレーム
+// なお使い回すのは「n番目の枠」であって物体ではない。広域鑑定では毎フレーム
 // 信頼度順に並べ替えるため、同じスロットが別の物体を指すことがある(アニメーションの
-// 位相が物体に紐づくのはシングル/固定中だけ)。表示自体はどちらでも壊れない。
+// 位相が物体に紐づくのは単体鑑定/固定中だけ)。表示自体はどちらでも壊れない。
 const boxPool = [];
 function boxAt(i) {
   if (boxPool[i]) return boxPool[i];
@@ -622,25 +679,32 @@ function render(payload) {
   for (let i = boxes.length; i < boxPool.length; i++) {
     boxPool[i].style.display = "none";
   }
+  // --- 鑑定盤 ---
+  // 状態は「今どう見ているか」を1語で出す。固定の有無は単体鑑定でしか意味を
+  // 持たないので、広域鑑定では走査中であることだけを示す。
+  pState.textContent = mode === MODE_MULTI ? "広域走査"
+    : lockBox ? (lockLostAt ? "見失い" : "固定") : "走査中";
+  pModeName.textContent = MODE_LABEL[mode];
+  pOpts.style.display = modePending ? "block" : "none";
+  const msg = Date.now() < toastUntil ? toastText : "";
+  pMsg.textContent = msg;
+  pMsg.style.display = msg ? "block" : "none";
+
+  // --- デバッグ行 ---
   const v = payload.view;
   const calibText = v
     ? ` | zoom ${v.zoom.toFixed(2)} off(${signed(v.offset_x)},${signed(v.offset_y)})`
     : "";
-  const lockText = mode === MODE_SINGLE && lockBox
-    ? (lockLostAt ? "/見失い" : "/固定中") : "";
-  const modeText = ` | mode ${MODE_LABEL[mode]}${lockText}`;
-  const pendingPart = modePending ? " | モード選択: 1=シングル 2=マルチ" : "";
-  const toastPart = Date.now() < toastUntil ? ` | ${toastText}` : "";
   // [DEBUG] 意匠決定後はこの1行と themePart の連結を削除する。
   const themePart = DEBUG_THEME_KEYS
     ? ` | 意匠 ${THEMES[themeIndex].name}(1-${THEMES.length}で切替)` : "";
   const hint = mode === MODE_SINGLE
-    ? ` | m→1/2:モード  Enter:固定/解除  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`
-    : ` | m→1/2:モード  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`;
+    ? ` | m→1/2:鑑定法  Enter:固定/解除  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`
+    : ` | m→1/2:鑑定法  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`;
   // 表示は絞っても objects は検出総数を出す(絞り込みで見えていない数が分かる)。
   hud.textContent =
     `fps ${payload.fps} | objects ${payload.detections.length}` +
-    `${calibText}${modeText}${pendingPart}${toastPart}${themePart}${hint}`;
+    `${calibText}${themePart}${hint}`;
 }
 
 function connect() {
