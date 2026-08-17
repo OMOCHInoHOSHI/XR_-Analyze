@@ -25,6 +25,15 @@
   #video { position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: contain; display: block; }
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  /* 注視点(照準)。単体鑑定のときだけ出し、「どこを見ている扱いか」を示す。
+     映像は object-fit:contain で中央に置かれるので、表示領域の中心は
+     stage の中心と一致する(レターボックスは上下または左右に均等に付く)。 */
+  #reticle { position: absolute; left: 50%; top: 50%;
+    width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none;
+    pointer-events: none; border: 1px solid var(--c);
+    transform: rotate(45deg); opacity: .55; }
+  #reticle::after { content: ""; position: absolute; left: 50%; top: 50%;
+    width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; background: var(--c); }
 
   /* --- 鑑定盤 (モード表示と鑑定法の選択) ---
      色(--c)と書体(--face)は意匠から受け取るので、盤も意匠に合わせて変わる。
@@ -296,6 +305,7 @@
   <!-- annotate=0: 枠とラベルはこのページ側(#overlay)で描くため、映像には焼き込ませない -->
   <img id="video" src="/video?annotate=0" alt="debug video" />
   <div id="overlay"></div>
+  <div id="reticle"></div>
   <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
        (検出名を扱うため innerHTML は使わない)。 -->
   <div id="ui">
@@ -336,6 +346,7 @@ const pState = document.getElementById("p-state");
 const pModeName = document.getElementById("p-modename");
 const pOpts = document.getElementById("p-opts");
 const pMsg = document.getElementById("p-msg");
+const reticle = document.getElementById("reticle");
 let showVideo = true;
 
 const STEP_ZOOM = 0.1;
@@ -571,13 +582,51 @@ function iou(a, b) {
   return uni > 0 ? inter / uni : 0;
 }
 
-// 単体鑑定で表示する1件。画面中央に最も近い検出を選ぶ
-// (XRグラスでは頭を向けて対象を狙うため、中央 = 見ているもの)。
-function nearestToCenter(dets) {
+// 映像が実際に占める矩形(レターボックスを除いた領域)。#video は
+// object-fit:contain なので、ウィンドウが映像と同じ縦横比でないと上下または
+// 左右に帯が付く。枠を stage 全体に対して配置すると、この帯のぶんだけ枠が
+// 映像からズレる(1440x900 で最大36px、正方形に近いウィンドウで175px)。
+// 映像OFF(AR表示)でも同じ矩形を使う。実世界に対する枠の縦横比を保つため。
+function viewRect() {
+  const W = stage.clientWidth, H = stage.clientHeight;
+  const s = lastPayload && lastPayload.source_size;
+  if (!s || !s.w || !s.h) return { x: 0, y: 0, w: W, h: H };
+  const scale = Math.min(W / s.w, H / s.h);
+  const vw = s.w * scale, vh = s.h * scale;
+  return { x: (W - vw) / 2, y: (H - vh) / 2, w: vw, h: vh };
+}
+
+// 画面中心からの距離を「表示ピクセル」で測る。正規化座標(0-1)のまま
+// dx*dx + dy*dy で測ると、16:9 では x の1単位=幅・y の1単位=高さなので
+// 横方向のズレが 1.78 倍過小評価され、画面端の物体が中央脇の物体に勝つ。
+function centerDistPx(d, r) {
+  const dx = (d.x + d.w / 2 - 0.5) * r.w;
+  const dy = (d.y + d.h / 2 - 0.5) * r.h;
+  return Math.hypot(dx, dy);
+}
+
+// 照準に入らなかった場合に拾う範囲。表示領域の短辺に対する比。
+// これが無いと、中央に何も無いとき視界の隅の物体が必ず選ばれてしまう。
+const GAZE_RADIUS = 0.25;
+
+// 単体鑑定で表示する1件 = 「今見ているもの」。
+//   1. 画面中心(照準)を含む検出。複数あれば面積の小さい方(より具体的な対象)
+//   2. 無ければ、照準から GAZE_RADIUS 以内で最も近い検出
+//   3. どちらも無ければ null (枠を出さない)
+function gazeTarget(dets, r) {
+  let hit = null;
+  for (const d of dets) {
+    if (d.x <= 0.5 && 0.5 <= d.x + d.w && d.y <= 0.5 && 0.5 <= d.y + d.h) {
+      if (!hit || d.w * d.h < hit.w * hit.h) hit = d;
+    }
+  }
+  if (hit) return hit;
+
+  const limit = GAZE_RADIUS * Math.min(r.w, r.h);
   let best = null, bestDist = Infinity;
   for (const d of dets) {
-    const dx = d.x + d.w / 2 - 0.5, dy = d.y + d.h / 2 - 0.5;
-    const dist = dx * dx + dy * dy;
+    const dist = centerDistPx(d, r);
+    if (dist > limit) continue;
     // 同距離なら信頼度の高い方。ちらつきの原因になる同点を残さない。
     if (dist < bestDist || (dist === bestDist && best && d.confidence > best.confidence)) {
       bestDist = dist;
@@ -602,7 +651,7 @@ function trackLock(dets) {
 }
 
 // 実際に描く検出のリストを決める。_state は枠の見た目("locked"/"lost")用。
-function visibleBoxes(dets) {
+function visibleBoxes(dets, r) {
   if (mode === MODE_MULTI) {
     currentTarget = null;
     return [...dets].sort((a, b) => b.confidence - a.confidence).slice(0, MULTI_MAX);
@@ -629,7 +678,7 @@ function visibleBoxes(dets) {
     }
   }
 
-  currentTarget = nearestToCenter(dets);
+  currentTarget = gazeTarget(dets, r);
   return currentTarget ? [currentTarget] : [];
 }
 
@@ -659,17 +708,19 @@ function boxAt(i) {
 
 function render(payload) {
   lastPayload = payload;
-  const W = stage.clientWidth, H = stage.clientHeight;
-  const boxes = visibleBoxes(payload.detections);
+  const r = viewRect();
+  const boxes = visibleBoxes(payload.detections, r);
+  // 照準は単体鑑定でだけ意味を持つ(広域鑑定は中心で絞り込まない)。
+  reticle.style.display = mode === MODE_SINGLE ? "block" : "none";
   for (let i = 0; i < boxes.length; i++) {
     const d = boxes[i];
     const box = boxAt(i);
     box.className = d._state ? `box ${d._state}` : "box";
     box.style.display = "block";
-    box.style.left = (d.x * W) + "px";
-    box.style.top = (d.y * H) + "px";
-    box.style.width = (d.w * W) + "px";
-    box.style.height = (d.h * H) + "px";
+    box.style.left = (r.x + d.x * r.w) + "px";
+    box.style.top = (r.y + d.y * r.h) + "px";
+    box.style.width = (d.w * r.w) + "px";
+    box.style.height = (d.h * r.h) + "px";
     // 日本語表示名(label_ja)を優先。無ければ英語ラベル。
     const name = d.label_ja || d.label;
     const mark = d._state === "locked" ? " [固定]"
