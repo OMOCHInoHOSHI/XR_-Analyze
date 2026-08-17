@@ -9,25 +9,252 @@
      デバッグ映像をOFFにすると枠だけが現実に重なる想定。 */
   html, body { margin: 0; height: 100%; background: #000; color: #0f0;
     font-family: -apple-system, "Helvetica Neue", sans-serif; overflow: hidden; }
-  #stage { position: relative; width: 100vw; height: 100vh; }
+
+  /* 意匠(デザイン)の色とフォントは #stage の data-theme で差し替える。
+     既定値はここに置いた「素の緑」= 従来の見た目で、各意匠が上書きする。
+     枠・ラベルは --c を見るだけなので、意匠を足すときはこのトークンと
+     装飾レイヤ(.d1/.d2)の使い方を書き足せば済む。 */
+  #stage { position: relative; width: 100vw; height: 100vh;
+    --c: #00ff66;          /* 通常の枠色 */
+    --c-lock: #ffcc00;     /* フォーカス固定中 */
+    --c-lost: #ffcc00;     /* 見失い中(猶予内) */
+    --face: "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+      "Yu Gothic", Meiryo, sans-serif; }
+
   /* デバッグ用MJPEG映像。AR表示時は 'd' キーで非表示にする。 */
   #video { position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: contain; display: block; }
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
   #hud { position: absolute; top: 8px; left: 10px; font-size: 13px;
-    text-shadow: 0 0 2px #000; pointer-events: none; }
-  /* 枠色は --c で持たせ、ラベル背景にも継承させる(状態で色を1箇所だけ変える)。 */
-  .box { position: absolute; border: 3px solid var(--c, #00ff66); box-sizing: border-box; }
+    text-shadow: 0 0 2px #000; pointer-events: none; color: var(--c); }
+
+  /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
+  .box { position: absolute; box-sizing: border-box;
+    border: 3px solid var(--c); }
   /* フォーカス固定中は色を変えて通常の枠と区別する。 */
-  .box.locked { --c: #ffcc00; }
+  .box.locked { --c: var(--c-lock); }
   /* 見失い中(猶予時間内)は破線+半透明。「まだ解除されていないが追従できていない」
      ことを示す。猶予を過ぎると自動で解除され通常の枠に戻る。 */
-  .box.lost { --c: #ffcc00; opacity: .5; border-style: dashed; }
+  .box.lost { --c: var(--c-lost); opacity: .5; border-style: dashed; }
+  /* 色は --c を「使う側の要素」で直接参照する。中間変数(--label-bg 等)に
+     var(--c) を入れて #stage で定義すると、その時点で値が確定して継承されるため、
+     .box.locked が --c を上書きしてもラベルだけ色が変わらなくなる。 */
   .label { position: absolute; transform: translateY(-100%);
-    background: var(--c, #00ff66); color: #000; font-size: 28px; font-weight: 700;
+    background: var(--c); color: #000;
+    font-size: 28px; font-weight: 700;
     line-height: 1.2; padding: 2px 8px; white-space: nowrap;
-    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    font-family: var(--face); }
+  /* 装飾レイヤ。意匠ごとに意味が違う(使わない意匠では非表示のまま)。
+     .box の直下は [label, d1, d2] の順で固定する。 */
+  .d1, .d2 { display: none; position: absolute; pointer-events: none; }
+
+  /* ========================= 意匠 壱: 蒼の走査 =========================
+     四隅の鉤括弧だけを光らせ、辺は極薄にして対象を隠さない。枠内を走査線が
+     上下に走り「鑑定中」を表す。固定すると走査が止まり内側に確定枠が出る。 */
+  #stage[data-theme="arcane"] {
+    --c: #79e7ff; --c-lock: #ffd34d; --c-lost: #ff6b8a;
+    --face: "Hiragino Mincho ProN", "Hiragino Mincho Pro",
+      "Yu Mincho", YuMincho, serif; }
+  [data-theme="arcane"] .box {
+    --k: 22px;                                    /* 鉤括弧の腕の長さ */
+    --g: linear-gradient(var(--c), var(--c));
+    border: 1px solid rgba(255, 255, 255, .10);
+    background:
+      var(--g) left  top    / var(--k) 2px no-repeat,
+      var(--g) left  top    / 2px var(--k) no-repeat,
+      var(--g) right top    / var(--k) 2px no-repeat,
+      var(--g) right top    / 2px var(--k) no-repeat,
+      var(--g) left  bottom / var(--k) 2px no-repeat,
+      var(--g) left  bottom / 2px var(--k) no-repeat,
+      var(--g) right bottom / var(--k) 2px no-repeat,
+      var(--g) right bottom / 2px var(--k) no-repeat;
+    filter: drop-shadow(0 0 5px var(--c)); }
+  [data-theme="arcane"] .label {
+    background: rgba(0, 14, 22, .62); color: var(--c);
+    border: 1px solid var(--c); letter-spacing: .06em; }
+  [data-theme="arcane"] .label::before { content: "◈ "; }
+  [data-theme="arcane"] .d1 { display: block; inset: 0; overflow: hidden; }
+  [data-theme="arcane"] .d1::before { content: ""; position: absolute;
+    left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--c), transparent);
+    animation: scan 2.6s linear infinite; }
+  /* 固定したら走査をやめ、内側に確定を示す二重枠を出す。 */
+  [data-theme="arcane"] .box.locked { --k: 34px; }
+  [data-theme="arcane"] .box.locked .d1 { display: none; }
+  [data-theme="arcane"] .box.locked .d2 { display: block; inset: 5px;
+    border: 1px solid var(--c); opacity: .55; }
+  @keyframes scan { from { top: -2px; } to { top: 100%; } }
+
+  /* ======================= 意匠 弐: 金の魔導書 =========================
+     外枠+内枠の二重線と四隅の菱形。菱形は呼吸するように明滅し、固定すると
+     明滅が止まって大きく開く(封蝋のイメージ)。ラベルは枠の下。 */
+  #stage[data-theme="grimoire"] {
+    --c: #e8c06a; --c-lock: #fff3c4; --c-lost: #8a6a3a;
+    --face: "Hiragino Mincho ProN", "Hiragino Mincho Pro",
+      "Yu Mincho", YuMincho, serif; }
+  [data-theme="grimoire"] .box { border: 2px solid var(--c);
+    box-shadow: 0 0 10px rgba(232, 192, 106, .3); }
+  [data-theme="grimoire"] .label { top: 100%; transform: none;
+    background: rgba(26, 18, 6, .66); color: var(--c);
+    border: 1px solid var(--c); border-top: none; letter-spacing: .08em; }
+  [data-theme="grimoire"] .label::before { content: "❖ "; }
+  [data-theme="grimoire"] .d1 { display: block; inset: 4px;
+    border: 1px solid var(--c); opacity: .5; }
+  [data-theme="grimoire"] .d2 { display: block; inset: 0; }
+  /* 四隅の菱形。擬似要素は1要素に2つまでなので .d2 と .box で分担する。 */
+  [data-theme="grimoire"] .box::before, [data-theme="grimoire"] .box::after,
+  [data-theme="grimoire"] .d2::before, [data-theme="grimoire"] .d2::after {
+    content: ""; position: absolute; width: 9px; height: 9px;
+    background: var(--c); transform: rotate(45deg);
+    animation: breathe 2.8s ease-in-out infinite; }
+  [data-theme="grimoire"] .d2::before { left: -5px; top: -5px; }
+  [data-theme="grimoire"] .d2::after { right: -5px; top: -5px; }
+  [data-theme="grimoire"] .box::before { left: -5px; bottom: -5px; }
+  [data-theme="grimoire"] .box::after { right: -5px; bottom: -5px; }
+  [data-theme="grimoire"] .box.locked { border-width: 3px; }
+  [data-theme="grimoire"] .box.locked::before,
+  [data-theme="grimoire"] .box.locked::after,
+  [data-theme="grimoire"] .box.locked .d2::before,
+  [data-theme="grimoire"] .box.locked .d2::after {
+    animation: none; opacity: 1; transform: rotate(45deg) scale(1.3); }
+  @keyframes breathe {
+    0%, 100% { opacity: .45; transform: rotate(45deg) scale(.85); }
+    50% { opacity: 1; transform: rotate(45deg) scale(1.15); } }
+
+  /* ======================= 意匠 参: 紫の秘術陣 =========================
+     対象の中心に二重の円陣を重ね、外周と内周を逆向きに回す。固定すると金色に
+     変わり回転が速くなる。枠自体は細くして陣を主役にする。 */
+  #stage[data-theme="sigil"] {
+    --c: #c9a6ff; --c-lock: #ffd34d; --c-lost: #6b6b7a;
+    --face: "Hiragino Mincho ProN", "Hiragino Mincho Pro",
+      "Yu Mincho", YuMincho, serif; }
+  [data-theme="sigil"] .box { border: 1px solid var(--c);
+    box-shadow: 0 0 8px rgba(201, 166, 255, .25); }
+  [data-theme="sigil"] .label {
+    background: rgba(14, 6, 26, .66); color: var(--c);
+    border: 1px solid var(--c); letter-spacing: .08em; }
+  [data-theme="sigil"] .label::before { content: "✦ "; }
+  /* 既定は枠に内接する楕円。aspect-ratio が使えるブラウザでは高さ基準の真円に
+     切り替える(横長の枠でも陣が潰れない)。 */
+  [data-theme="sigil"] .d1 { display: block; left: 50%; top: 50%;
+    height: 62%; width: 62%; border-radius: 50%;
+    border: 2px solid var(--c); border-top-color: transparent;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px rgba(201, 166, 255, .45);
+    animation: spin 6s linear infinite; }
+  [data-theme="sigil"] .d2 { display: block; left: 50%; top: 50%;
+    height: 42%; width: 42%; border-radius: 50%;
+    border: 1px dashed var(--c); transform: translate(-50%, -50%);
+    animation: spin-rev 4.5s linear infinite; }
+  @supports (aspect-ratio: 1) {
+    [data-theme="sigil"] .d1, [data-theme="sigil"] .d2 {
+      width: auto; aspect-ratio: 1; }
+  }
+  [data-theme="sigil"] .box.locked .d1 { animation-duration: 1.6s;
+    border-top-color: var(--c); }
+  [data-theme="sigil"] .box.locked .d2 { animation-duration: 1.2s;
+    border-style: solid; opacity: .7; }
+  @keyframes spin {
+    from { transform: translate(-50%, -50%) rotate(0); }
+    to { transform: translate(-50%, -50%) rotate(360deg); } }
+  @keyframes spin-rev {
+    from { transform: translate(-50%, -50%) rotate(0); }
+    to { transform: translate(-50%, -50%) rotate(-360deg); } }
+
+  /* ======================= 意匠 伍: 白環の銘板 =========================
+     ゲームの鑑定ウィンドウ風。対象を環(楕円)で囲み、環の右上から引き出し線を
+     伸ばして、その先の銘板に名前を出す。捕捉中は環から波紋が広がり、固定すると
+     波紋が止まって環が二重になる。
+     引き出し線の向きは右上固定なので、画面の右上端にある対象では銘板が画面外へ
+     はみ出す。意匠候補としての既知の制約(向きの自動反転は入れていない)。 */
+  #stage[data-theme="ring"] {
+    --c: #eaf6ff; --c-lock: #ffb347; --c-lost: #7b8794;
+    --face: "Hiragino Sans", "Hiragino Kaku Gothic ProN",
       "Yu Gothic", Meiryo, sans-serif; }
+  /* 四角い枠は出さず、環だけで囲う。 */
+  [data-theme="ring"] .box { border: none; }
+  [data-theme="ring"] .d1 { display: block; inset: -6%;
+    border: 2px solid var(--c); border-radius: 50%;
+    box-shadow: 0 0 10px rgba(234, 246, 255, .35); }
+  /* 波紋 = 「今この対象を見ている」表示。固定すると止まり外周の環になる。 */
+  [data-theme="ring"] .d1::before { content: ""; position: absolute;
+    inset: -3px; border: 1px solid var(--c); border-radius: 50%;
+    animation: ping 2.8s ease-out infinite; }
+  /* 引き出し線。始点(環の右上45°)と長さは銘板の位置と対になっている。 */
+  [data-theme="ring"] .d2 { display: block; left: 90%; top: 10%;
+    width: 80px; height: 2px; background: var(--c);
+    transform-origin: 0 50%; transform: rotate(-45deg);
+    box-shadow: 0 0 6px rgba(234, 246, 255, .5); }
+  /* 銘板。左下角を引き出し線の先端に合わせ、下線が線の続きに見えるようにする。 */
+  [data-theme="ring"] .label { left: 90%; top: 10%;
+    transform: translate(56px, -57px) translateY(-100%);
+    background: rgba(6, 14, 22, .55); color: var(--c);
+    border-bottom: 2px solid var(--c); padding: 2px 10px 3px;
+    letter-spacing: .1em; font-weight: 600; }
+  [data-theme="ring"] .label::before { content: "▸ "; opacity: .75; }
+  [data-theme="ring"] .box.locked .d1 { border-width: 3px; }
+  [data-theme="ring"] .box.locked .d1::before {
+    animation: none; inset: -7px; opacity: .85; }
+  [data-theme="ring"] .box.lost .d1 { border-style: dashed; }
+  @keyframes ping {
+    0% { transform: scale(1); opacity: .6; }
+    70%, 100% { transform: scale(1.28); opacity: 0; } }
+
+  /* ======================= 意匠 六: 蒼環の菱標 =========================
+     伍の構図(環で囲む → 引き出し線 → 銘板)に、壱の配色と菱形のあしらいを載せた
+     組み合わせ。菱形は環の上・左・下と引き出し線の起点の4点に置き、ゆっくり
+     明滅する。固定すると明滅が止まって菱形が開き、波紋も外周の環として残る。
+     明滅は opacity だけを動かす(位置決めに transform を使っているため、
+     transform を動かすアニメーションだと配置が壊れる)。
+     引き出し線が右上固定である制約は伍と同じ。 */
+  #stage[data-theme="azure"] {
+    --c: #79e7ff; --c-lock: #ffd34d; --c-lost: #ff6b8a;
+    --face: "Hiragino Mincho ProN", "Hiragino Mincho Pro",
+      "Yu Mincho", YuMincho, serif; }
+  [data-theme="azure"] .box { border: none; }
+  [data-theme="azure"] .d1 { display: block; inset: -6%;
+    border: 2px solid var(--c); border-radius: 50%;
+    box-shadow: 0 0 10px rgba(121, 231, 255, .35); }
+  [data-theme="azure"] .d1::before { content: ""; position: absolute;
+    inset: -3px; border: 1px solid var(--c); border-radius: 50%;
+    animation: ping 2.8s ease-out infinite; }
+  [data-theme="azure"] .d2 { display: block; left: 90%; top: 10%;
+    width: 80px; height: 2px; background: var(--c);
+    transform-origin: 0 50%; transform: rotate(-45deg);
+    box-shadow: 0 0 6px rgba(121, 231, 255, .5); }
+  [data-theme="azure"] .label { left: 90%; top: 10%;
+    transform: translate(56px, -57px) translateY(-100%);
+    background: rgba(0, 14, 22, .62); color: var(--c);
+    border-bottom: 2px solid var(--c); padding: 2px 10px 3px;
+    letter-spacing: .08em; }
+  [data-theme="azure"] .label::before { content: "◈ "; }
+  /* 菱形4点。位置ごとに置き場所が違うだけで見た目は共通。 */
+  [data-theme="azure"] .d1::after,
+  [data-theme="azure"] .box::before,
+  [data-theme="azure"] .box::after,
+  [data-theme="azure"] .d2::before {
+    content: ""; position: absolute; width: 9px; height: 9px;
+    background: var(--c); box-shadow: 0 0 6px var(--c);
+    animation: glim 2.6s ease-in-out infinite; }
+  [data-theme="azure"] .d1::after {            /* 環の上 */
+    left: 50%; top: 0; transform: translate(-50%, -50%) rotate(45deg); }
+  [data-theme="azure"] .box::before {          /* 環の左 */
+    left: -6%; top: 50%; transform: translate(-50%, -50%) rotate(45deg); }
+  [data-theme="azure"] .box::after {           /* 環の下 */
+    left: 50%; top: 106%; transform: translate(-50%, -50%) rotate(45deg); }
+  /* 引き出し線の起点。親が -45° 回っているので追加の回転なしで菱形になる。 */
+  [data-theme="azure"] .d2::before {
+    left: 0; top: 50%; transform: translate(-50%, -50%); }
+  [data-theme="azure"] .box.locked .d1 { border-width: 3px; }
+  [data-theme="azure"] .box.locked .d1::before {
+    animation: none; inset: -7px; opacity: .85; }
+  [data-theme="azure"] .box.locked .d1::after,
+  [data-theme="azure"] .box.locked::before,
+  [data-theme="azure"] .box.locked::after,
+  [data-theme="azure"] .box.locked .d2::before {
+    animation: none; opacity: 1; width: 12px; height: 12px; }
+  [data-theme="azure"] .box.lost .d1 { border-style: dashed; }
+  @keyframes glim { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 </style>
 </head>
 <body>
@@ -47,9 +274,11 @@
 //   ↑↓←→    : 切り抜き位置(表示位置)の移動
 //   s        : 現在のズーム/位置を保存 (次回起動時に自動で復元)
 //   0        : ズーム・位置をリセット
+//   1〜6     : 枠の意匠(デザイン)を切替 ※デバッグ用。意匠決定後に削除する
 // ズーム/位置はサーバ側のカメラ切り抜きを動かすので、映像も検出枠も一緒に動く。
 // モード/フォーカス固定は「どの検出を描くか」の表示ポリシーなので、サーバに状態を
 // 増やさずこのページだけで完結させる(推論内容には影響しない)。
+const stage = document.getElementById("stage");
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
@@ -68,11 +297,34 @@ const MULTI_MAX = 10;
 let mode = MODE_MULTI;
 
 // 'm' を押してから数字キーを待つ2ストローク入力。数字キーは 0(リセット)が既に
-// 単独機能に使われており、1/2 도 单独にするとモード数が増えたときに衝突しやすい。
+// 単独機能に使われており、1/2 も単独にするとモード数が増えたときに衝突しやすい。
 // 'm' を前置きさせることで数字キーの空間を分け、調整中の誤爆も防ぐ。
 const MODE_PENDING_MS = 3000;  // 待ち状態の自動キャンセル
 let modePending = false;
 let modePendingTimer = null;
+
+// --- [DEBUG] 意匠(デザイン)の切り替え ---------------------------------------
+// 枠の見た目の候補を数字キーで見比べるための暫定機能。意匠が決まったら
+// この節と keydown の default 節、HUD の themePart を消せば元に戻る。
+// 'm' の待ち状態が先に処理されるため、m→1/2 のモード切替とは衝突しない。
+const DEBUG_THEME_KEYS = true;
+const THEMES = [
+  { key: "1", id: "arcane", name: "壱:蒼の走査" },
+  { key: "2", id: "grimoire", name: "弐:金の魔導書" },
+  { key: "3", id: "sigil", name: "参:紫の秘術陣" },
+  { key: "4", id: "legacy", name: "肆:素の緑(現行)" },
+  { key: "5", id: "ring", name: "伍:白環の銘板" },
+  { key: "6", id: "azure", name: "六:蒼環の菱標" },
+];
+let themeIndex = 0;
+function setTheme(i) {
+  themeIndex = i;
+  stage.dataset.theme = THEMES[i].id;
+  toast(`意匠: ${THEMES[i].name}`);
+}
+// フラグを false にしたら data-theme を付けない = ベースCSS(素の緑)に戻る。
+if (DEBUG_THEME_KEYS) stage.dataset.theme = THEMES[themeIndex].id;
+// --- [DEBUG] ここまで -------------------------------------------------------
 
 // --- フォーカス固定 ---------------------------------------------------------
 // 検出結果にトラッキングIDが無いため、ロック対象は「最後に確定した枠」として保持し、
@@ -243,6 +495,12 @@ document.addEventListener("keydown", (e) => {
     case "0":
       calib({ reset: true });
       break;
+    default:
+      // [DEBUG] 意匠の切り替え。意匠決定後はこの節ごと削除する。
+      if (DEBUG_THEME_KEYS) {
+        const i = THEMES.findIndex((t) => t.key === e.key);
+        if (i >= 0) setTheme(i);
+      }
   }
 });
 
@@ -318,28 +576,51 @@ function visibleBoxes(dets) {
   return currentTarget ? [currentTarget] : [];
 }
 
+// 枠の要素は作り直さず使い回す。毎フレーム DOM を捨てて作ると走査線や円陣の
+// CSSアニメーションが常に先頭へ巻き戻り、まったく進まなくなるため。
+// 子要素は [label, d1, d2] の順で固定し、余った枠は display:none で隠す。
+// なお使い回すのは「n番目の枠」であって物体ではない。マルチモードでは毎フレーム
+// 信頼度順に並べ替えるため、同じスロットが別の物体を指すことがある(アニメーションの
+// 位相が物体に紐づくのはシングル/固定中だけ)。表示自体はどちらでも壊れない。
+const boxPool = [];
+function boxAt(i) {
+  if (boxPool[i]) return boxPool[i];
+  const box = document.createElement("div");
+  const label = document.createElement("div");
+  label.className = "label";
+  box.appendChild(label);
+  const d1 = document.createElement("div");
+  d1.className = "d1";
+  box.appendChild(d1);
+  const d2 = document.createElement("div");
+  d2.className = "d2";
+  box.appendChild(d2);
+  overlay.appendChild(box);
+  boxPool[i] = box;
+  return box;
+}
+
 function render(payload) {
   lastPayload = payload;
-  const stage = document.getElementById("stage");
   const W = stage.clientWidth, H = stage.clientHeight;
-  overlay.innerHTML = "";
   const boxes = visibleBoxes(payload.detections);
-  for (const d of boxes) {
-    const box = document.createElement("div");
+  for (let i = 0; i < boxes.length; i++) {
+    const d = boxes[i];
+    const box = boxAt(i);
     box.className = d._state ? `box ${d._state}` : "box";
+    box.style.display = "block";
     box.style.left = (d.x * W) + "px";
     box.style.top = (d.y * H) + "px";
     box.style.width = (d.w * W) + "px";
     box.style.height = (d.h * H) + "px";
-    const label = document.createElement("div");
-    label.className = "label";
     // 日本語表示名(label_ja)を優先。無ければ英語ラベル。
     const name = d.label_ja || d.label;
     const mark = d._state === "locked" ? " [固定]"
       : d._state === "lost" ? " [見失い]" : "";
-    label.textContent = `${name} ${(d.confidence * 100) | 0}%${mark}`;
-    box.appendChild(label);
-    overlay.appendChild(box);
+    box.children[0].textContent = `${name} ${(d.confidence * 100) | 0}%${mark}`;
+  }
+  for (let i = boxes.length; i < boxPool.length; i++) {
+    boxPool[i].style.display = "none";
   }
   const v = payload.view;
   const calibText = v
@@ -350,13 +631,16 @@ function render(payload) {
   const modeText = ` | mode ${MODE_LABEL[mode]}${lockText}`;
   const pendingPart = modePending ? " | モード選択: 1=シングル 2=マルチ" : "";
   const toastPart = Date.now() < toastUntil ? ` | ${toastText}` : "";
+  // [DEBUG] 意匠決定後はこの1行と themePart の連結を削除する。
+  const themePart = DEBUG_THEME_KEYS
+    ? ` | 意匠 ${THEMES[themeIndex].name}(1-${THEMES.length}で切替)` : "";
   const hint = mode === MODE_SINGLE
     ? ` | m→1/2:モード  Enter:固定/解除  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`
     : ` | m→1/2:モード  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`;
   // 表示は絞っても objects は検出総数を出す(絞り込みで見えていない数が分かる)。
   hud.textContent =
     `fps ${payload.fps} | objects ${payload.detections.length}` +
-    `${calibText}${modeText}${pendingPart}${toastPart}${hint}`;
+    `${calibText}${modeText}${pendingPart}${toastPart}${themePart}${hint}`;
 }
 
 function connect() {
