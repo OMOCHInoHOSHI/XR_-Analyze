@@ -406,9 +406,9 @@ MODEL=yoloe-11s-seg.pt CLASSES="wallet,watch,ring,coin,trading card" \
 
 > 実装言語を C 系へ移す案は効果がありません。処理時間の 9 割以上は
 > PyTorch / Metal のカーネル内にあり、Python のグルーコードは 10% 未満です。
-> CoreML / Neural Engine への書き出しはさらに 1.34 倍速い (9.3fps) と実測できて
-> いますが、信頼度が fp16 のぶんずれること等を理由に未採用です
-> ([ADR-0016](docs/adr/0016-mask-free-fast-inference.md))。
+> CoreML / Neural Engine への書き出しは実機でさらに 1.87 倍速い (9.6fps) と実測
+> できていますが、安定化層を通した後の表示ラベルの入れ替わりが約2倍に増えるため
+> 未採用です ([ADR-0016](docs/adr/0016-mask-free-fast-inference.md))。
 
 ## メモ / 既知の制約
 

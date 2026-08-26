@@ -7,6 +7,9 @@ venv/
 # YOLO weights (auto-downloaded)
 *.pt
 
+# CoreML への書き出し(compare_coreml の出力。再生成可能で60MBある)
+*.mlpackage
+
 # 語彙ダンプ(dump_vocab の出力。再生成可能)
 vocab.json
 vocab_untranslated.json
