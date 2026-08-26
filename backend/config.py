@@ -29,6 +29,17 @@ def _float(name: str, default: float) -> float:
         return default
 
 
+def _bool(name: str, default: bool) -> bool:
+    """環境変数を 0/1 整数として読み、bool に変換する。不正値は既定値。"""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return bool(int(raw))
+    except (TypeError, ValueError):
+        return default
+
+
 def _float_view(name: str, saved_key: str, default: float) -> float:
     """
     調整値を「環境変数 > 保存ファイル(calib.json) > 既定値」の優先順位で読む。
@@ -118,6 +129,18 @@ IMG_SIZE: int = _int("IMG_SIZE", 640)
 # 一度に表示・配信する検出数の上限(信頼度の高い順にN件)。
 # 多クラスモデルで表示が増えすぎる/重い時に小さくする。0以下で無制限。
 MAX_DET: int = _int("MAX_DET", 15)
+
+# --- 検出安定化 ---
+# 時系列フィルタで検出結果のフリッカーを抑制する。STAB_ENABLED=0 で無効。
+STAB_ENABLED: bool = _bool("STAB_ENABLED", True)
+STAB_APPEAR_CONF: float = _float("STAB_APPEAR_CONF", 0.45)   # 出現確定の生 conf
+STAB_LOSE_CONF: float = _float("STAB_LOSE_CONF", 0.25)       # 消失判定の生 conf
+STAB_LOSE_HOLD_SEC: float = _float("STAB_LOSE_HOLD_SEC", 0.3)  # 消失ヒステリシス秒数
+STAB_LABEL_HOLD_SEC: float = _float("STAB_LABEL_HOLD_SEC", 0.3)  # ラベル確定遅延秒数
+STAB_ALPHA: float = _float("STAB_ALPHA", 0.4)                # EMA 係数(大きいほど追従が速い)
+STAB_IOU: float = _float("STAB_IOU", 0.3)                    # 同一ラベルのマッチ閾値
+
+
 def _auto_device() -> str:
     """
     推論デバイスを決める。

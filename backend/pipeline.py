@@ -15,6 +15,7 @@ import numpy as np
 from . import config
 from .camera import Camera, select_camera_index
 from .detector import Detection, Detector
+from .stabilizer import DetectionStabilizer
 
 
 class Pipeline:
@@ -32,6 +33,15 @@ class Pipeline:
         self._detector = Detector(
             config.MODEL, config.CONF_THRES, config.IOU_THRES,
             config.IMG_SIZE, config.DEVICE, config.CLASSES,
+        )
+        self._stabilizer = DetectionStabilizer(
+            enabled=config.STAB_ENABLED,
+            appear_conf=config.STAB_APPEAR_CONF,
+            lose_conf=config.STAB_LOSE_CONF,
+            lose_hold_sec=config.STAB_LOSE_HOLD_SEC,
+            label_hold_sec=config.STAB_LABEL_HOLD_SEC,
+            alpha=config.STAB_ALPHA,
+            iou_threshold=config.STAB_IOU,
         )
         self._lock = threading.Lock()
         self._frame: Optional[np.ndarray] = None          # 最新の生フレーム(BGR)
@@ -69,9 +79,12 @@ class Pipeline:
                 if config.MAX_DET > 0 and len(dets) > config.MAX_DET:
                     dets.sort(key=lambda d: d.confidence, reverse=True)
                     dets = dets[: config.MAX_DET]
+                # 時系列フィルタでフリッカー(出現/消失/ラベル/confの揺れ)を抑制
+                dets = self._stabilizer.update(dets, time.time())
             except Exception as e:  # 推論失敗してもループは止めない
                 self._error = f"detect error: {e}"
-                dets = []
+                # 例外時も安定化層を通す(空を渡す)。生の空で上書きすると表示が一瞬消える
+                dets = self._stabilizer.update([], time.time())
 
             now = time.time()
             dt = now - last
