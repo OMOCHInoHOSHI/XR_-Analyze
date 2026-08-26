@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+from . import fast_infer
 from .labels_ja import to_ja
 
 
@@ -98,10 +99,14 @@ class Detector:
         imgsz: int,
         device: str = "",
         classes: list[str] | None = None,
+        max_det: int = 0,
+        fast: bool = True,
+        dedup_iou: float = 0.0,
     ):
         self.conf = conf
         self.iou = iou
         self.imgsz = imgsz
+        self.max_det = max_det
         self.device = device or None  # 空文字なら ultralytics の自動選択
         self.model = YOLO(model_path)
 
@@ -125,43 +130,59 @@ class Detector:
 
         self.names: dict[int, str] = self.model.names
 
+        # マスク生成と Results 構築を省いた推論経路 (理由: docs/adr/0016-mask-free-fast-inference.md)
+        # 組めない構成では None が返り、predict() 経路にそのまま落ちる。
+        self._fast = (
+            fast_infer.build(self.model, device, imgsz, conf, iou, max_det, dedup_iou)
+            if fast
+            else None
+        )
+        route = "高速(マスク省略)" if self._fast else "ultralytics predict()"
+        print(f"[detector] 推論経路: {route}")
+
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:
-        """BGRフレームを推論して Detection のリストを返す。"""
+        """BGRフレームを推論して Detection のリストを返す。信頼度の高い順。"""
         h, w = frame_bgr.shape[:2]
+        if self._fast is not None:
+            boxes, confs, class_ids = self._fast.infer(frame_bgr)
+        else:
+            boxes, confs, class_ids = self._predict_boxes(frame_bgr)
+
+        return [
+            self._to_detection(box, float(conf), int(cls_id), w, h)
+            for box, conf, cls_id in zip(boxes, confs, class_ids)
+        ]
+
+    def _predict_boxes(self, frame_bgr: np.ndarray):
+        """ultralytics の predict() 経路。高速経路を組めなかった場合のフォールバック。"""
         results = self.model.predict(
             frame_bgr,
             conf=self.conf,
             iou=self.iou,
             imgsz=self.imgsz,
             device=self.device,
+            max_det=self.max_det if self.max_det > 0 else 300,
             verbose=False,
         )
-        out: list[Detection] = []
-        if not results:
-            return out
+        if not results or results[0].boxes is None:
+            return [], [], []
+        b = results[0].boxes
+        return b.xyxy.cpu().numpy(), b.conf.cpu().numpy(), b.cls.cpu().numpy()
 
-        r = results[0]
-        if r.boxes is None:
-            return out
-
-        for box in r.boxes:
-            cls_id = int(box.cls[0])
-            conf = float(box.conf[0])
-            x1, y1, x2, y2 = (float(v) for v in box.xyxy[0])
-            label_en = self.names.get(cls_id, str(cls_id))
-            out.append(
-                Detection(
-                    label=label_en,
-                    label_ja=to_ja(label_en),
-                    class_id=cls_id,
-                    confidence=round(conf, 4),
-                    x=round(x1 / w, 5),
-                    y=round(y1 / h, 5),
-                    w=round((x2 - x1) / w, 5),
-                    h=round((y2 - y1) / h, 5),
-                )
-            )
-        return out
+    def _to_detection(self, box, conf: float, cls_id: int, w: int, h: int) -> Detection:
+        """xyxy(元画像ピクセル)を正規化 bbox の Detection へ変換する。"""
+        x1, y1, x2, y2 = (float(v) for v in box)
+        label_en = self.names.get(cls_id, str(cls_id))
+        return Detection(
+            label=label_en,
+            label_ja=to_ja(label_en),
+            class_id=cls_id,
+            confidence=round(conf, 4),
+            x=round(x1 / w, 5),
+            y=round(y1 / h, 5),
+            w=round((x2 - x1) / w, 5),
+            h=round((y2 - y1) / h, 5),
+        )
 
     @staticmethod
     def annotate(frame_bgr: np.ndarray, detections: list[Detection]) -> np.ndarray:

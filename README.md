@@ -239,6 +239,8 @@ python3 -m backend.build_ja_dict
 | `MAX_DET` | 15 | 一度に表示する検出数の上限(信頼度上位N件)。0以下で無制限 |
 | `CONF_THRES` | 0.35 | 信頼度しきい値 |
 | `IMG_SIZE` | 640 | 推論サイズ(小さいほど速い) |
+| `FAST_INFER` | 1 | マスク生成を省いた高速推論経路を使う。`0` で ultralytics の `predict()` に戻す |
+| `DEDUP_IOU` | 0.85 | 同一物体に別ラベルの枠が重なったとき、信頼度の高い方だけ残すIoU閾値。0以下で無効 |
 | `DEVICE` | (自動) | `cpu` / `cuda` / `mps`。**Apple Siliconでは自動でmps(GPU)** |
 | `STREAM_FPS` | 15 | WebSocket/MJPEGの配信fps上限 |
 | `JP_FONT` | (自動) | MJPEGの日本語描画フォント。自動検出に失敗する時だけ .ttc/.ttf を指定 |
@@ -376,6 +378,37 @@ MODEL=yoloe-11s-seg.pt CLASSES="wallet,watch,ring,coin,trading card" \
 
 「なぜこう作ったか」は [docs/adr/](docs/adr/) にまとめてあります。一覧は
 [docs/adr/README.md](docs/adr/README.md) を参照してください。
+
+## 速度について
+
+`yoloe-11l-seg-pf.pt` のようなセグメンテーション版のオープン語彙モデルは、
+**使わないマスクの生成に毎フレーム 40ms 前後**を払っています。マスク復元は
+検出件数に比例するため、「何も映っていないと速く、モノを映して枠が出ると遅くなる」
+という形で効きます。
+
+既定 (`FAST_INFER=1`) ではこのマスク経路を切り離してあり、Apple M4 / `IMG_SIZE=640`
+での実測は次のとおりです (検出12件の画像、旧経路と交互に25回測定)。
+
+| 経路 | 1フレーム | fps |
+|---|---|---|
+| `FAST_INFER=0` (ultralytics `predict()`) | 193.2ms | 5.2 |
+| `FAST_INFER=1` (既定) | 140.0ms | 7.1 |
+
+実機 (InnoMaker / `CAM_ZOOM=2.4` / 検出5件) では **4.4fps 前後 → 6.5fps 前後**でした。
+検出結果は変わりません。詳細と検証方法は
+[ADR-0016](docs/adr/0016-mask-free-fast-inference.md) を参照してください。
+
+さらに速くしたい場合は、精度とのトレードオフになりますが次の順で効きます。
+
+1. `IMG_SIZE=512` — 推論サイズを落とす。小さい物体を取りこぼしやすくなる
+2. `MODEL=yoloe-11s-seg-pf.pt` — 同じ語彙のまま小型版へ。実測で約2倍速い
+3. `MODEL=yolov8n.pt` — COCO 80カテゴリに割り切る。実測 27fps
+
+> 実装言語を C 系へ移す案は効果がありません。処理時間の 9 割以上は
+> PyTorch / Metal のカーネル内にあり、Python のグルーコードは 10% 未満です。
+> CoreML / Neural Engine への書き出しはさらに 1.34 倍速い (9.3fps) と実測できて
+> いますが、信頼度が fp16 のぶんずれること等を理由に未採用です
+> ([ADR-0016](docs/adr/0016-mask-free-fast-inference.md))。
 
 ## メモ / 既知の制約
 

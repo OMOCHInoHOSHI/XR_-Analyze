@@ -1,5 +1,6 @@
 # Core
 ultralytics>=8.2.0      # YOLO (object detection). Pulls in torch automatically.
+torchvision>=0.15       # NMS (batched_nms)。ultralytics も依存するが直接使うので明示
 opencv-python>=4.9.0    # Camera capture (UVC) + drawing
 numpy>=1.24
 

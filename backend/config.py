@@ -130,6 +130,13 @@ IMG_SIZE: int = _int("IMG_SIZE", 640)
 # 多クラスモデルで表示が増えすぎる/重い時に小さくする。0以下で無制限。
 MAX_DET: int = _int("MAX_DET", 15)
 
+# マスク生成と Results 構築を省いた推論経路を使う。0 で ultralytics の predict() に戻す。
+# 出力は predict() と一致する (理由: docs/adr/0016-mask-free-fast-inference.md)
+FAST_INFER: bool = _bool("FAST_INFER", True)
+# 同一物体に別ラベルの枠が重なった場合、信頼度の高い方だけを残す IoU 閾値。
+# 0 以下で無効。高速経路でのみ効く (理由: docs/adr/0016-mask-free-fast-inference.md)
+DEDUP_IOU: float = _float("DEDUP_IOU", 0.85)
+
 # --- 検出安定化 ---
 # 時系列フィルタで検出結果のフリッカーを抑制する。STAB_ENABLED=0 で無効。
 STAB_ENABLED: bool = _bool("STAB_ENABLED", True)

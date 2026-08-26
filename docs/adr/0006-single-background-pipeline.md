@@ -1,8 +1,14 @@
 # ADR-0006: 取得と推論を単一の背景スレッドに集約し、最新の1件だけを保持する
 
-- ステータス: 承認済み
+- ステータス: 承認済み (スレッド構成のみ [ADR-0017](0017-decoupled-capture-thread.md) で置換)
 - 記録日: 2026-08-18
-- 関連: [ADR-0002](0002-detection-streaming-contract.md), [ADR-0007](0007-viewport-crop-calibration.md), [ADR-0010](0010-client-side-display-policy.md)
+- 関連: [ADR-0002](0002-detection-streaming-contract.md), [ADR-0007](0007-viewport-crop-calibration.md), [ADR-0010](0010-client-side-display-policy.md), [ADR-0016](0016-mask-free-fast-inference.md), [ADR-0017](0017-decoupled-capture-thread.md)
+
+> **後日の変更**: 「取得と推論を 1 本のスレッドで回す」という部分だけは
+> [ADR-0017](0017-decoupled-capture-thread.md) で取得スレッドの分離に置き換えた。
+> 「最新の 1 件だけを保持する」「調整値にロックを持たない」「推論失敗で止めない」
+> という残りの決定はそのまま有効である。`MAX_DET` の絞り込み位置も
+> [ADR-0016](0016-mask-free-fast-inference.md) で `Detector` 側へ移した。
 
 ## 文脈
 

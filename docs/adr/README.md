@@ -32,3 +32,5 @@
 | [0013](0013-overlay-coordinate-basis.md) | 枠は映像が実際に占める矩形を基準に配置する | `frontend/index.html` |
 | [0014](0014-box-theme-and-dom-reuse.md) | 意匠は CSS で切り替え、枠の DOM は毎フレーム使い回す | `frontend/index.html` |
 | [0015](0015-key-binding-policy.md) | 鑑定法の切替は 2 ストローク、修飾キー付きは触らない | `frontend/index.html` |
+| [0016](0016-mask-free-fast-inference.md) | マスクを作らない推論経路を自前で持つ | `fast_infer.py` / `detector.py` |
+| [0017](0017-decoupled-capture-thread.md) | カメラ取得を推論から切り離し、専用スレッドで回す | `pipeline.py` / `camera.py` |

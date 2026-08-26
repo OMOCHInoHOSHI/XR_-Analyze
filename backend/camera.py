@@ -179,17 +179,31 @@ class Camera:
                 break
             time.sleep(0.05)
 
-    def read(self):
-        """(ok, frame) を返す。frame は BGR numpy 配列(向き補正・ズーム/オフセット適用済み)。"""
+    def grab(self):
+        """(ok, frame) を返す。frame は補正前の生 BGR フレーム。"""
         if self._cap is None:
             raise RuntimeError("open() を先に呼んでください。")
-        ok, frame = self._cap.read()
+        return self._cap.read()
+
+    def transform(self, frame):
+        """
+        生フレームに向き補正とズーム/オフセットを適用する。
+
+        取得と分けてあるのは、推論に使わず捨てるフレームの補正を省くため
+        (理由: docs/adr/0017-decoupled-capture-thread.md)
+        """
+        # flipを先に、cropを後に適用する (理由: docs/adr/0007-viewport-crop-calibration.md)
+        if self._flip_code is not None:
+            frame = cv2.flip(frame, self._flip_code)
+        frame = crop_zoom(frame, self.zoom, self.offset_x, self.offset_y)
+        self._out_size = (frame.shape[1], frame.shape[0])
+        return frame
+
+    def read(self):
+        """(ok, frame) を返す。frame は BGR numpy 配列(向き補正・ズーム/オフセット適用済み)。"""
+        ok, frame = self.grab()
         if ok and frame is not None:
-            # flipを先に、cropを後に適用する (理由: docs/adr/0007-viewport-crop-calibration.md)
-            if self._flip_code is not None:
-                frame = cv2.flip(frame, self._flip_code)
-            frame = crop_zoom(frame, self.zoom, self.offset_x, self.offset_y)
-            self._out_size = (frame.shape[1], frame.shape[0])
+            frame = self.transform(frame)
         return ok, frame
 
     @property

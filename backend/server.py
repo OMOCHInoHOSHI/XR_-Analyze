@@ -137,12 +137,11 @@ async def ws_detections(ws: WebSocket):
     last_sent = -1
     try:
         while True:
-            if pipeline is not None:
+            # 新しいフレームのときだけ組み立てて送る(無駄な再送とJSON化を防ぐ)
+            if pipeline is not None and pipeline.frame_id != last_sent:
                 payload = pipeline.detections_payload()
-                # 新しいフレームのときだけ送る(無駄な再送を防ぐ)
-                if payload["frame_id"] != last_sent:
-                    last_sent = payload["frame_id"]
-                    await ws.send_json(payload)
+                last_sent = payload["frame_id"]
+                await ws.send_json(payload)
             await asyncio.sleep(interval)
     except WebSocketDisconnect:
         return
@@ -154,14 +153,21 @@ async def ws_detections(ws: WebSocket):
 def _mjpeg_generator(annotate: bool):
     boundary = b"--frame"
     encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.JPEG_QUALITY]
+    last_sent = -1
     while True:
         if pipeline is None:
             time.sleep(0.05)
             continue
-        _fid, frame, dets = pipeline.snapshot()
+        # 推論fpsがSTREAM_FPSより低いと同じフレームが何度も来る。
+        # snapshot() はフレームをコピーするので、送る分が無いなら呼ばない。
+        if pipeline.frame_id == last_sent:
+            time.sleep(0.005)
+            continue
+        fid, frame, dets = pipeline.snapshot()
         if frame is None:
             time.sleep(0.02)
             continue
+        last_sent = fid
         if annotate:
             frame = Detector.annotate(frame, dets)
         ok, buf = cv2.imencode(".jpg", frame, encode_params)

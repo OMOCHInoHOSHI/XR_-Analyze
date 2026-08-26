@@ -3,6 +3,9 @@
 
 常に「最新の1フレーム/検出結果」だけを保持し、WebSocket/MJPEG はこれを参照する
 (理由: docs/adr/0006-single-background-pipeline.md)
+
+取得と推論はスレッドを分けてある。推論がカメラ待ちで止まらず、常に最新フレームを
+推論できる (理由: docs/adr/0017-decoupled-capture-thread.md)
 """
 from __future__ import annotations
 
@@ -33,6 +36,8 @@ class Pipeline:
         self._detector = Detector(
             config.MODEL, config.CONF_THRES, config.IOU_THRES,
             config.IMG_SIZE, config.DEVICE, config.CLASSES,
+            max_det=config.MAX_DET, fast=config.FAST_INFER,
+            dedup_iou=config.DEDUP_IOU,
         )
         self._stabilizer = DetectionStabilizer(
             enabled=config.STAB_ENABLED,
@@ -43,42 +48,74 @@ class Pipeline:
             alpha=config.STAB_ALPHA,
             iou_threshold=config.STAB_IOU,
         )
+        # 取得スレッドが書き、推論スレッドが取り出す「最新の生フレーム」1枚だけの受け渡し口。
+        self._raw_lock = threading.Lock()
+        self._raw_frame: Optional[np.ndarray] = None
+        self._raw_ready = threading.Event()
+
         self._lock = threading.Lock()
-        self._frame: Optional[np.ndarray] = None          # 最新の生フレーム(BGR)
+        self._frame: Optional[np.ndarray] = None          # 最新の補正済みフレーム(BGR)
         self._detections: list[Detection] = []            # 最新の検出
         self._frame_id: int = 0                            # フレーム連番
         self._fps: float = 0.0                             # 実測の推論fps
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._threads: list[threading.Thread] = []
         self._error: Optional[str] = None
 
     # --- ライフサイクル ---
     def start(self) -> None:
         self._camera.open()
         self._running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
+        self._threads = [
+            threading.Thread(target=self._capture_loop, daemon=True),
+            threading.Thread(target=self._infer_loop, daemon=True),
+        ]
+        for t in self._threads:
+            t.start()
 
     def stop(self) -> None:
         self._running = False
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
+        self._raw_ready.set()  # 待機中の推論スレッドを起こして終了させる
+        for t in self._threads:
+            t.join(timeout=2.0)
+        self._threads = []
         self._camera.release()
 
-    # --- 背景ループ ---
-    def _loop(self) -> None:
-        last = time.time()
+    # --- 取得スレッド ---
+    def _capture_loop(self) -> None:
+        """カメラを回し続け、最新の生フレームだけを保持する。古い分は捨てる。"""
         while self._running:
-            ok, frame = self._camera.read()
+            ok, frame = self._camera.grab()
             if not ok or frame is None:
                 time.sleep(0.01)
                 continue
+            with self._raw_lock:
+                self._raw_frame = frame
+                # 取り出し側が同じロックの中で clear() するので、set() もロック内で行う
+                self._raw_ready.set()
+
+    def _take_raw_frame(self) -> Optional[np.ndarray]:
+        """最新の生フレームを取り出す。無ければ届くまで待つ。"""
+        if not self._raw_ready.wait(timeout=1.0):
+            return None
+        with self._raw_lock:
+            frame = self._raw_frame
+            self._raw_frame = None
+            self._raw_ready.clear()
+        return frame
+
+    # --- 推論スレッド ---
+    def _infer_loop(self) -> None:
+        last = time.time()
+        while self._running:
+            raw = self._take_raw_frame()
+            if raw is None:
+                continue
+            # 向き補正とズームは、実際に推論するフレームにだけ掛ける
+            frame = self._camera.transform(raw)
             try:
+                # detect() が信頼度上位 MAX_DET 件までに絞って返す
                 dets = self._detector.detect(frame)
-                # 信頼度の高い順に上限件数だけ残す(表示過多と負荷を抑える)
-                if config.MAX_DET > 0 and len(dets) > config.MAX_DET:
-                    dets.sort(key=lambda d: d.confidence, reverse=True)
-                    dets = dets[: config.MAX_DET]
                 # 時系列フィルタでフリッカー(出現/消失/ラベル/confの揺れ)を抑制
                 dets = self._stabilizer.update(dets, time.time())
             except Exception as e:  # 推論失敗してもループは止めない
@@ -121,12 +158,21 @@ class Pipeline:
 
     # --- 参照系(スレッドセーフ) ---
     def snapshot(self) -> tuple[int, Optional[np.ndarray], list[Detection]]:
+        """フレーム付きスナップショット。MJPEG 配信のようにフレームが要る用途向け。"""
         with self._lock:
             frame = None if self._frame is None else self._frame.copy()
             return self._frame_id, frame, list(self._detections)
 
+    @property
+    def frame_id(self) -> int:
+        with self._lock:
+            return self._frame_id
+
     def detections_payload(self) -> dict:
-        fid, _frame, dets = self.snapshot()
+        # 検出JSONにフレーム画素は要らないので、ここではコピーしない
+        with self._lock:
+            fid = self._frame_id
+            dets = [d.to_dict() for d in self._detections]
         w, h = self._camera.actual_size
         return {
             "frame_id": fid,
@@ -135,6 +181,6 @@ class Pipeline:
             "source_size": {"w": w, "h": h},
             # フロントの HUD 表示用。サーバが持つ値を正とし、クランプ後の実値を返す。
             "view": self.view(),
-            "detections": [d.to_dict() for d in dets],
+            "detections": dets,
             "error": self._error,
         }
