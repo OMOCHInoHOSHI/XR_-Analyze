@@ -37,7 +37,7 @@ class Pipeline:
             config.MODEL, config.CONF_THRES, config.IOU_THRES,
             config.IMG_SIZE, config.DEVICE, config.CLASSES,
             max_det=config.MAX_DET, fast=config.FAST_INFER,
-            dedup_iou=config.DEDUP_IOU,
+            dedup_iou=config.DEDUP_IOU, vocab_policy=config.VOCAB,
         )
         self._stabilizer = DetectionStabilizer(
             enabled=config.STAB_ENABLED,

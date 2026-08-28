@@ -241,6 +241,7 @@ python3 -m backend.build_ja_dict
 | `IMG_SIZE` | 640 | 推論サイズ(小さいほど速い) |
 | `FAST_INFER` | 1 | マスク生成を省いた高速推論経路を使う。`0` で ultralytics の `predict()` に戻す |
 | `DEDUP_IOU` | 0.85 | 同一物体に別ラベルの枠が重なったとき、信頼度の高い方だけ残すIoU閾値。0以下で無効 |
+| `VOCAB` | auto | 検出語彙の絞り込み。`auto`(語彙の大きいモデルだけLVISで絞る) / `lvis` / `all`(絞らない) / 1行1語のファイルパス |
 | `DEVICE` | (自動) | `cpu` / `cuda` / `mps`。**Apple Siliconでは自動でmps(GPU)** |
 | `STREAM_FPS` | 15 | WebSocket/MJPEGの配信fps上限 |
 | `JP_FONT` | (自動) | MJPEGの日本語描画フォント。自動検出に失敗する時だけ .ttc/.ttf を指定 |
@@ -379,6 +380,38 @@ MODEL=yoloe-11s-seg.pt CLASSES="wallet,watch,ring,coin,trading card" \
 「なぜこう作ったか」は [docs/adr/](docs/adr/) にまとめてあります。一覧は
 [docs/adr/README.md](docs/adr/README.md) を参照してください。
 
+## ラベルがコロコロ変わるとき (語彙の絞り込み)
+
+オープン語彙モデルの内蔵語彙には、**物体ではない語**が大量に混ざっています。
+`yoloe-11l-seg-pf.pt` の 4585 語には `stack` `activity` `accident` `darkness`
+`computer room` `street scene` といった語が含まれ、これらが実在の物体名と競合して
+毎フレーム最上位ラベルが入れ替わります。暗い部屋にカメラを向けると
+「ダークネス」が信頼度0.92で最上位に出る、といった具合です。
+
+既定 (`VOCAB=auto`) では、語彙の大きいモデルに限って **LVIS 1203カテゴリに
+一致する語だけ**に絞ります (4585語 → 1054語)。実機フレーム40枚での実測:
+
+| | 最上位ラベルの入れ替わり(生) | 安定化層の通過後 | トップラベル |
+|---|---|---|---|
+| `VOCAB=all` | 24回 | 6回 | `stack` 21 / `monitor` 9 / `computer chair` 6 |
+| `VOCAB=auto` (既定) | **4回** | **0回** | **`monitor` 40/40** |
+
+副次的に速くもなります (91.0ms → 81.9ms)。残したクラスのスコアは絞り込み前と
+完全に同じで、消えた語の枠が「許可されている中での最良の名前」へ付け替わります。
+
+**語彙が狭すぎる場合**は、書き出して必要な語を足してください。LVIS に無い物体
+(`laptop` `humidifier` `smartphone` など) は名前が付かなくなります。
+
+```bash
+python3 -m backend.vocab > my_vocab.txt   # 現在の語彙を書き出す
+# my_vocab.txt に laptop などを書き足す (1行1語、# 以降はコメント)
+VOCAB=my_vocab.txt python3 -m backend.server
+```
+
+絞り込みをやめるには `VOCAB=all` を指定します。詳細と、検討して採らなかった案
+(同義語の統合・機械的な語彙拡張) は
+[ADR-0018](docs/adr/0018-vocabulary-restriction.md) を参照してください。
+
 ## 速度について
 
 `yoloe-11l-seg-pf.pt` のようなセグメンテーション版のオープン語彙モデルは、
@@ -400,6 +433,7 @@ MODEL=yoloe-11s-seg.pt CLASSES="wallet,watch,ring,coin,trading card" \
 
 さらに速くしたい場合は、精度とのトレードオフになりますが次の順で効きます。
 
+0. `VOCAB` で語彙を絞る — 上記のとおり既定で有効。ラベルの安定にも効く
 1. `IMG_SIZE=512` — 推論サイズを落とす。小さい物体を取りこぼしやすくなる
 2. `MODEL=yoloe-11s-seg-pf.pt` — 同じ語彙のまま小型版へ。実測で約2倍速い
 3. `MODEL=yolov8n.pt` — COCO 80カテゴリに割り切る。実測 27fps

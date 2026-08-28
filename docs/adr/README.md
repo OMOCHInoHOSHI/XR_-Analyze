@@ -34,3 +34,4 @@
 | [0015](0015-key-binding-policy.md) | 鑑定法の切替は 2 ストローク、修飾キー付きは触らない | `frontend/index.html` |
 | [0016](0016-mask-free-fast-inference.md) | マスクを作らない推論経路を自前で持つ | `fast_infer.py` / `detector.py` |
 | [0017](0017-decoupled-capture-thread.md) | カメラ取得を推論から切り離し、専用スレッドで回す | `pipeline.py` / `camera.py` |
+| [0018](0018-vocabulary-restriction.md) | 検出語彙を実在の物体だけに絞る | `vocab.py` / `fast_infer.py` |

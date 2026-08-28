@@ -136,6 +136,11 @@ FAST_INFER: bool = _bool("FAST_INFER", True)
 # 同一物体に別ラベルの枠が重なった場合、信頼度の高い方だけを残す IoU 閾値。
 # 0 以下で無効。高速経路でのみ効く (理由: docs/adr/0016-mask-free-fast-inference.md)
 DEDUP_IOU: float = _float("DEDUP_IOU", 0.85)
+# 検出語彙の絞り込み。`auto`(既定) / `lvis` / `all`(絞らない) / 1行1語のファイルパス。
+# プロンプトフリーの内蔵語彙 4585 語には物体でない語 (`stack` `darkness` `computer room`)
+# が多く、実在の物体名と競合してラベルのちらつきを起こす。`auto` は語彙の大きい
+# モデルのときだけ LVIS で絞る (理由: docs/adr/0018-vocabulary-restriction.md)
+VOCAB: str = os.environ.get("VOCAB", "auto").strip()
 
 # --- 検出安定化 ---
 # 時系列フィルタで検出結果のフリッカーを抑制する。STAB_ENABLED=0 で無効。

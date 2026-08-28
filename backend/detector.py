@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from . import fast_infer
+from . import fast_infer, vocab
 from .labels_ja import to_ja
 
 
@@ -102,6 +102,7 @@ class Detector:
         max_det: int = 0,
         fast: bool = True,
         dedup_iou: float = 0.0,
+        vocab_policy: str = "all",
     ):
         self.conf = conf
         self.iou = iou
@@ -132,13 +133,19 @@ class Detector:
 
         # マスク生成と Results 構築を省いた推論経路 (理由: docs/adr/0016-mask-free-fast-inference.md)
         # 組めない構成では None が返り、predict() 経路にそのまま落ちる。
+        # CLASSES で明示的に語彙を挙げている場合は、それが利用者の指定した語彙。
+        # さらに絞ると指定した語を落としかねないので触らない。
+        keep = None if classes else vocab.resolve(self.names, vocab_policy)
         self._fast = (
-            fast_infer.build(self.model, device, imgsz, conf, iou, max_det, dedup_iou)
+            fast_infer.build(self.model, device, imgsz, conf, iou, max_det, dedup_iou, keep)
             if fast
             else None
         )
         route = "高速(マスク省略)" if self._fast else "ultralytics predict()"
         print(f"[detector] 推論経路: {route}")
+        if keep and self._fast is None:
+            # 絞り込みはヘッドを切り詰めて実現しているので predict() 経路では効かない
+            print("[vocab] predict() 経路では語彙の絞り込みは適用されません")
 
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:
         """BGRフレームを推論して Detection のリストを返す。信頼度の高い順。"""

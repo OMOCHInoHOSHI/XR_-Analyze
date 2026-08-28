@@ -73,6 +73,41 @@ class _ZeroMaskCoef(torch.nn.Module):
         )
 
 
+def _slice_vocab(head, keep: list[int]) -> bool:
+    """
+    語彙ヘッドを keep のクラスだけに切り詰める。成功したら True。
+
+    プロンプトフリーのモデルは、クラス名の埋め込みが `lrpc[i].vocab` の重みの
+    「行」として焼き込まれている。行を抜き出すだけなので、残したクラスのスコアは
+    絞り込み前と完全に同じになる。同時に行列積と出力テンソルが小さくなる
+    (理由: docs/adr/0018-vocabulary-restriction.md)
+    """
+    lrpc = getattr(head, "lrpc", None)
+    if lrpc is None:
+        return False
+
+    index = torch.tensor(keep, dtype=torch.long)
+    for sub in lrpc:
+        vocab = sub.vocab
+        weight, bias = vocab.weight, vocab.bias
+        if bias is None:
+            return False
+        with torch.no_grad():
+            picked_w = weight.detach()[index.to(weight.device)].clone()
+            picked_b = bias.detach()[index.to(bias.device)].clone()
+        if isinstance(vocab, torch.nn.Linear):
+            new = torch.nn.Linear(vocab.in_features, len(keep), bias=True)
+        elif isinstance(vocab, torch.nn.Conv2d):
+            new = torch.nn.Conv2d(vocab.in_channels, len(keep), kernel_size=1, bias=True)
+        else:
+            return False
+        with torch.no_grad():
+            new.weight.copy_(picked_w)
+            new.bias.copy_(picked_b)
+        sub.vocab = new.to(weight.device).to(weight.dtype)
+    return True
+
+
 def _resolve_device(device: str) -> torch.device:
     """空文字なら利用可能な最速デバイスを選ぶ。config._auto_device と同じ優先順位。"""
     if device:
@@ -97,7 +132,15 @@ class FastInferencer:
         max_det: int,
         num_masks: int,
         dedup_iou: float = 0.0,
+        class_ids: torch.Tensor | None = None,
+        select_rows: bool = False,
     ) -> None:
+        # 語彙を絞ったときの「絞り込み後の番号 -> 元の class_id」対応表。
+        # None なら絞っていない(番号がそのまま class_id)。
+        self._class_ids = class_ids
+        # ヘッドを切り詰められなかったモデル向け。後処理でスコアの行を選ぶ。
+        # 結果は切り詰めた場合と同じで、速くならないだけ。
+        self._select_rows = select_rows
         self._net = net
         self._device = device
         self._imgsz = imgsz
@@ -137,8 +180,11 @@ class FastInferencer:
         # pred: (1, 4 + nc + nm, アンカー数)。末尾 nm 行はマスク係数なので読まない。
         p = pred[0]
         nc = p.shape[0] - 4 - self._num_masks
+        scores = p[4 : 4 + nc]
+        if self._select_rows and self._class_ids is not None:
+            scores = scores[self._class_ids.to(scores.device)]
         # クラス次元の最大値だけを見る(ultralytics も multi_label=False で同じ)
-        conf, cls = p[4 : 4 + nc].max(0)
+        conf, cls = scores.max(0)
         idx = (conf > self._conf).nonzero(as_tuple=True)[0]
         empty = (np.zeros((0, 4), np.float32), np.zeros(0, np.float32), np.zeros(0, np.int64))
         if idx.numel() == 0:
@@ -167,6 +213,8 @@ class FastInferencer:
         if kept.numel() == 0:
             return empty
         boxes, conf, cls = boxes[kept], conf[kept], cls[kept]
+        if self._class_ids is not None:
+            cls = self._class_ids.to(cls.device)[cls]  # 元の class_id へ戻す
 
         # レターボックスを打ち消して元画像の座標へ戻す
         boxes[:, 0::2] -= pad_x
@@ -185,6 +233,7 @@ def build(
     iou: float,
     max_det: int,
     dedup_iou: float = 0.0,
+    keep_classes: Optional[list[int]] = None,
 ) -> Optional[FastInferencer]:
     """
     YOLO モデルから高速推論経路を組み立てる。
@@ -207,6 +256,15 @@ def build(
             net.fuse(verbose=False)
 
         # マスク経路の切り離し。seg モデルでも bbox の計算には一切関与しない。
+        class_ids = None
+        select_rows = False
+        if keep_classes:
+            class_ids = torch.tensor(keep_classes, dtype=torch.long)
+            if not _slice_vocab(head, keep_classes):
+                # ヘッドを切り詰められないモデルは、後処理で行を選ぶ。
+                # 結果は同じで、行列積が小さくならないぶん速くならない。
+                select_rows = True
+
         num_masks = 0
         if hasattr(head, "proto") and hasattr(head, "nm"):
             num_masks = int(head.nm)
@@ -221,7 +279,7 @@ def build(
         # 補うものが無いので掛けない (理由: docs/adr/0016-mask-free-fast-inference.md)
         fast = FastInferencer(
             net, torch_device, imgsz, conf, iou, max_det, num_masks,
-            dedup_iou if num_masks > 0 else 0.0,
+            dedup_iou if num_masks > 0 else 0.0, class_ids, select_rows,
         )
         # 1枚流して形が想定どおりか確かめる(壊れていればここで例外になる)
         fast.infer(np.zeros((64, 64, 3), np.uint8))
