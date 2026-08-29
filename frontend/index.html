@@ -542,6 +542,13 @@ function clearSel() {
 }
 
 function setMode(next) {
+  // 選び直しただけで解除はしない。円盤を開いて確認し、そのまま確定して閉じる
+  // (カーソルは今の鑑定法から始まるので Enter の空打ちになる) のは自然な操作で、
+  // そこで固定が外れると「固定は明示的な解除でだけ外れる」前提が壊れる。
+  if (next === mode) {
+    toast(`${MODE_LABEL[next]} ── 変更なし`);
+    return;
+  }
   mode = next;
   // 鑑定法をまたいで選択を残すと、広域鑑定中に見えない固定状態が残るため解除する。
   clearSel();
@@ -706,13 +713,11 @@ function toggleLock() {
   toast(`鑑定を固定 ── ${target.label_ja || target.label}`);
 }
 
-// Esc は「今かかっている状態を1つ外す」。円盤 → 調整モード → 選択/固定 の順で、
-// 円盤の分は keydown の先頭で処理済み。
+// Esc は「今かかっている状態を1つ外す」。円盤 → 調整モード → 選択/固定 の順に外すが、
+// 円盤と調整モードの Esc は keydown の先頭でそれぞれ処理して return しているため、
+// ここへ来るのは「どちらでもない」ときだけ。調整モードの Esc を消すなら
+// keydown 側 (case "c": case "Escape":) を直すこと。ここには無い。
 function onEscape() {
-  if (calibMode) {
-    setCalibMode(false);
-    return;
-  }
   if (sel) {
     const wasLocked = selLocked;
     clearSel();
@@ -880,6 +885,11 @@ const NAV_DIR = {
 const NAV_CROSS_WEIGHT = 2;
 // 中心がほぼ同じものを「その向きにある」と扱わないための最小値(表示ピクセル)
 const NAV_MIN_PX = 2;
+// 横ずれを許す上限。前進量の何倍まで「その向きにある」と認めるか(2 = 約63°)。
+// 減点だけで足切りしないと、真横に大きく離れた検出が「わずかに前」という理由で
+// 勝ってしまう。前進 5px・横 278px の検出が、前進 400px の真上の検出に勝つ事象を
+// テストで確認した (理由: docs/adr/0020-arrow-target-navigation.md)
+const NAV_CONE = 2;
 
 // 今の対象(無ければ照準)から見て、指定の向きにある最も近い検出を返す。
 // 距離は表示ピクセルで測る (理由: docs/adr/0011-gaze-target-selection.md)。
@@ -897,6 +907,7 @@ function navTarget(dets, r, dir) {
     const main = (px - cx) * ux + (py - cy) * uy;             // 進む向きの成分
     if (main <= NAV_MIN_PX) continue;   // 真横・後ろ・自分自身は候補にしない
     const cross = Math.abs((px - cx) * uy - (py - cy) * ux);  // 横にずれた分
+    if (cross > main * NAV_CONE) continue;   // 向きから外れすぎたものは候補にしない
     const score = main + cross * NAV_CROSS_WEIGHT;
     // 同点なら信頼度の高い方。ちらつきの原因になる同点を残さない。
     if (score < bestScore || (score === bestScore && best && d.confidence > best.confidence)) {

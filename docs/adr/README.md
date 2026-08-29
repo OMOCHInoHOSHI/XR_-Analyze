@@ -35,3 +35,5 @@
 | [0016](0016-mask-free-fast-inference.md) | マスクを作らない推論経路を自前で持つ | `fast_infer.py` / `detector.py` |
 | [0017](0017-decoupled-capture-thread.md) | カメラ取得を推論から切り離し、専用スレッドで回す | `pipeline.py` / `camera.py` |
 | [0018](0018-vocabulary-restriction.md) | 検出語彙を実在の物体だけに絞る | `vocab.py` / `fast_infer.py` |
+| [0019](0019-key-binding-policy-v2.md) | 矢印キーは鑑定の操作に充て、映像の調整は 'c' の中へ隔離する | `frontend/index.html` |
+| [0020](0020-arrow-target-navigation.md) | 単体鑑定の対象は矢印の空間方向で選び替え、選択と固定を分ける | `frontend/index.html` |

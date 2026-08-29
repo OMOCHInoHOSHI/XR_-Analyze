@@ -1,8 +1,8 @@
 # ADR-0015: 鑑定法の切替は 2 ストローク、修飾キー付きは触らない
 
-- ステータス: 承認済み
+- ステータス: 置換 (ADR-0019 による)
 - 記録日: 2026-08-18
-- 関連: [ADR-0010](0010-client-side-display-policy.md), [ADR-0014](0014-box-theme-and-dom-reuse.md)
+- 関連: [ADR-0010](0010-client-side-display-policy.md), [ADR-0014](0014-box-theme-and-dom-reuse.md), [ADR-0019](0019-key-binding-policy-v2.md)
 
 ## 文脈
 
