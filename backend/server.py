@@ -9,6 +9,7 @@
                        ?annotate=0 で枠を焼き込まない素の映像 (フロントはこちらを使う)
   POST /calib       -> 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ)
   POST /calib/save  -> 現在の調整値をファイルへ保存 (次回起動時に自動で復元)
+  POST /explain     -> 物体ラベルから日本語の説明文を生成 (Ollama のローカルLLM)
 
 起動:
   cd "XR_ Analyze"
@@ -17,12 +18,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import cv2
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -127,6 +131,82 @@ async def calib_save():
         f"CAM_OFFSET_Y={view['offset_y']})"
     )
     return {"status": "ok", "path": str(path), "file": path.name, **view}
+
+
+# 説明文のキャッシュ (label -> text)。生成は秒単位の処理なので、同一ラベルの
+# 再生成はしない。プロセスを起動し直せば消える(恒久保存はしない方針)。
+_explain_cache: dict[str, str] = {}
+
+
+class ExplainRequest(BaseModel):
+    """説明を生成する物体。label は検出ラベル(英語)、ja はフロントの日本語表示名(任意)。"""
+
+    label: str
+    ja: str | None = None
+
+
+def _ollama_explain(label: str, ja: str | None) -> str:
+    """
+    Ollama の /api/chat を呼び、物体の日本語説明文を得る。
+
+    依存を増やさないため HTTP クライアントは stdlib の urllib で済ませる。
+    この関数は同期 def なエンドポイントから呼ぶため、FastAPI がスレッドプールで
+    実行し、イベントループを塞がない。
+    """
+    name = ja if ja else label
+    prompt = (
+        "次の物体について日本語で説明してください。\n"
+        f"物体名: {name} ({label})\n"
+        "- 2〜3文で書く\n"
+        "- 見出し・太字(*)・箇条書きなどの装飾記法は使わない\n"
+        "- 説明文だけを出力する(前置きや挨拶は書かない)"
+    )
+    # think:false は必須。付けないと英語の思考トレースが出て、時間も余計にかかる
+    # (理由: docs/adr/0024-llm-object-explanation.md)
+    body = json.dumps({
+        "model": config.OLLAMA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "think": False,
+        "options": {"temperature": 0.3, "num_predict": 150},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{config.OLLAMA_URL.rstrip('/')}/api/chat",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=config.EXPLAIN_TIMEOUT_SEC) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama に接続できません。起動を確認してください (ollama serve)",
+        ) from e
+    text = (data.get("message") or {}).get("content", "").strip()
+    if not text:
+        raise HTTPException(
+            status_code=503, detail="説明文の生成が空でした。もう一度お試しください"
+        )
+    return text
+
+
+@app.post("/explain")
+def explain(req: ExplainRequest):
+    """
+    物体ラベルから日本語の説明文を生成する(フロントの説明ウィンドウ用)。
+
+    クラウドAPIではなくローカルLLM(Ollama)にした理由: docs/adr/0024-llm-object-explanation.md
+    同一ラベルはキャッシュを返し、生成は1回だけ行う。
+    """
+    cached = _explain_cache.get(req.label)
+    if cached is not None:
+        return {"label": req.label, "text": cached}
+    text = _ollama_explain(req.label, req.ja)
+    _explain_cache[req.label] = text
+    return {"label": req.label, "text": text}
 
 
 @app.websocket("/ws")

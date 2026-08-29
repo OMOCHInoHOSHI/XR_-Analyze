@@ -139,6 +139,30 @@
     from { opacity: 0; transform: scale(.9); }
     to { opacity: 1; transform: scale(1); } }
 
+  /* --- 説明ウィンドウ (単体鑑定で固定した物体のLLM説明) ---
+     固定の報せと一緒に中央へ出す鑑定結果の書。盤(#wheel)と同じく中央固定で、
+     色(--c)と書体(--face)は意匠から受け取るので、盤と一緒に変わる。
+     開閉の演出は opacity だけ (#wheel の wheel-in は scale を含むため
+     transform: translate(-50%,-50%) と併用できない)。 */
+  #explain { position: absolute; left: 50%; top: 50%;
+    width: 56vmin; max-width: 640px;
+    transform: translate(-50%, -50%); display: none; pointer-events: none;
+    background: rgba(0, 14, 22, .78); color: var(--c);
+    border: 1px solid var(--c); padding: 7px 16px 9px;
+    font-family: var(--face); }
+  #explain.on { display: block; animation: e-in .16s ease-out; }
+  @keyframes e-in {
+    from { opacity: 0; }
+    to { opacity: 1; } }
+  /* 見出し行。盤(#panel)の p-head と同じあしらい。 */
+  .e-head { display: flex; gap: 20px; justify-content: space-between;
+    border-bottom: 1px solid rgba(255, 255, 255, .18);
+    margin-bottom: 5px; padding-bottom: 2px; }
+  .e-name { font-weight: 700; font-size: 17px; letter-spacing: .12em; }
+  .e-key { opacity: .6; font-size: 11px; align-self: center; white-space: nowrap; }
+  /* 本文。説明文は文章なので字間は締め、行間は広めに取る。 */
+  #e-body { font-size: 15px; line-height: 1.75; letter-spacing: .05em; }
+
   /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
   .box { position: absolute; box-sizing: border-box;
     border: 3px solid var(--c); }
@@ -383,6 +407,16 @@
     <i class="w-mark"></i>
     <div class="w-hub"><b>モ ー ド</b>数字で確定 / ←↑↓→ と Enter</div>
   </div>
+  <!-- 説明ウィンドウ。単体鑑定で固定した物体のLLM説明を出す。
+       タイトルと本文は JS が textContent で差し替える (検出名を扱うため
+       innerHTML は使わない)。 -->
+  <div id="explain">
+    <div class="e-head">
+      <span class="e-name" id="e-name"></span>
+      <span class="e-key">Enter/Esc で閉じる</span>
+    </div>
+    <div id="e-body"></div>
+  </div>
   <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
        (検出名を扱うため innerHTML は使わない)。 -->
   <div id="ui">
@@ -413,6 +447,7 @@
 //   ←↑↓→    : 単体鑑定で対象を選び替える(その向きにある最も近い検出へ)
 //   Enter    : 選んでいる対象に鑑定を固定 / 固定を解除
 //   Esc      : 選択・固定を解除して照準ベースに戻す
+//   説明ウィンドウ表示中: Enter/Esc でウィンドウを閉じる (それ以外のキーは無効)
 //   c        : 調整モードの出入り(ズーム・切り抜き位置・保存はこの中だけ)
 //   d        : デバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
 //   1〜6     : 枠の意匠(デザイン)を切替 ※デバッグ用。意匠決定後に削除する
@@ -435,6 +470,9 @@ const pCalib = document.getElementById("p-calib");
 const pMsg = document.getElementById("p-msg");
 const reticle = document.getElementById("reticle");
 const wheel = document.getElementById("wheel");
+const explainWin = document.getElementById("explain");
+const eName = document.getElementById("e-name");
+const eBody = document.getElementById("e-body");
 let showVideo = true;
 
 const STEP_ZOOM = 0.1;
@@ -479,6 +517,66 @@ const wheelItems = [];   // 円周上の項目。起動時に1回だけ作る
 // 矢印キーを対象の選択に譲ったため、ズーム・切り抜き位置・保存は 'c' で入る
 // 調整モードの中だけで効かせる (理由: docs/adr/0019-key-binding-policy-v2.md)
 let calibMode = false;
+
+// --- 説明ウィンドウ (単体鑑定の固定で開く) -----------------------------------
+// 固定した対象の説明文はサーバ (/explain → Ollama) で生成する。生成は秒単位の
+// 処理なので、同一ラベルはこちらでもキャッシュして再取得しない。サーバ側にも
+// 同じキャッシュがあるが、重複して投げない意味でフロントの分も持つ。
+let explainOpen = false;
+let explainLabel = null;          // 窓を開いた対象のラベル。届いた応答が今の対象のものか判定に使う
+const explainCache = new Map();   // label -> 説明文
+
+function renderExplain() {
+  explainWin.classList.toggle("on", explainOpen);
+}
+
+function openExplain(target) {
+  explainOpen = true;
+  explainLabel = target.label;
+  eName.textContent = target.label_ja || target.label;
+  const cached = explainCache.get(target.label);
+  if (cached !== undefined) {
+    eBody.textContent = cached;
+  } else {
+    eBody.textContent = "説明を生成中…";
+    requestExplain(target.label, target.label_ja || target.label);
+  }
+  renderExplain();
+  repaint();  // 照準を消す(窓が中央で照準と重なるため)
+}
+
+function closeExplain() {
+  explainOpen = false;
+  explainLabel = null;
+  renderExplain();
+  repaint();  // 消えた照準を戻す
+}
+
+// 説明文を取りに行く。届いたときに窓が別の対象へ変わっていたら捨てる。
+// 失敗は窓の中に載せる(toast も併用)。生成中・失敗とも innerHTML は使わない。
+function requestExplain(label, name) {
+  fetch("/explain", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, ja: name }),
+  })
+    .then((r) => {
+      if (!r.ok) {
+        // 503 の detail(日本語メッセージ)をそのまま窓に載せるため拾う
+        return r.json().then((d) => { throw new Error(d.detail || "説明の生成に失敗しました"); });
+      }
+      return r.json();
+    })
+    .then((d) => {
+      explainCache.set(d.label, d.text);
+      if (explainOpen && explainLabel === d.label) eBody.textContent = d.text;
+    })
+    .catch((err) => {
+      if (!(explainOpen && explainLabel === label)) return;
+      eBody.textContent = err.message || "説明の生成に失敗しました";
+      setToast("AI説明に失敗しました ── Ollama が起動しているか確認してください", 3000);
+    });
+}
 
 // --- [DEBUG] 意匠(デザイン)の切り替え ---------------------------------------
 // 枠の見た目候補を見比べる暫定機能。意匠決定後は本節・default節・themePartを削除
@@ -569,6 +667,9 @@ function clearSel() {
   selLocked = false;
   selLostAt = 0;
   clearTimeout(selGraceTimer);
+  // 窓は固定対象の説明なので、固定が外れたら一緒に閉じる。render() の中からも
+  // 呼ばれるが、closeExplain の描き直しは sel=null の後なので再帰は1段で止まる。
+  if (explainOpen) closeExplain();
 }
 
 function setMode(next) {
@@ -789,6 +890,9 @@ function toggleLock() {
   selLostAt = 0;
   clearTimeout(selGraceTimer);
   toast(`鑑定を固定 ── ${target.label_ja || target.label}`);
+  // 固定した瞬間に説明ウィンドウを出す。解除のときは出さない
+  // (理由: docs/adr/0024-llm-object-explanation.md)
+  openExplain(target);
 }
 
 // Esc は「今かかっている状態を1つ外す」。円盤 → 調整モード → 選択/固定 の順に外すが、
@@ -811,6 +915,15 @@ document.addEventListener("keydown", (e) => {
   // 円盤が開いている間は、すべてのキーを盤の操作として扱う。
   if (wheelOpen) {
     onWheelKey(e);
+    return;
+  }
+
+  // 説明ウィンドウが開いている間は、閉じることだけを担う。Esc が「解除」に
+  // 染まっていると窓を閉じるたびに固定まで外れてしまうため、窓を閉じても
+  // 選択・固定の状態は保つ (理由: docs/adr/0019-key-binding-policy-v2.md)
+  if (explainOpen) {
+    e.preventDefault();
+    if (e.key === "Enter" || e.key === "Escape") closeExplain();
     return;
   }
 
@@ -1079,8 +1192,8 @@ function render(payload) {
   const r = viewRect();
   const boxes = visibleBoxes(payload.detections, r);
   // 照準は単体鑑定でだけ意味を持つ(広域鑑定は中心で絞り込まない)。
-  // 円盤を開いている間は中央の見出しと重なるので消す。
-  reticle.style.display = mode === MODE_SINGLE && !wheelOpen ? "block" : "none";
+  // 円盤や説明ウィンドウが中央にある間は重なるので消す。
+  reticle.style.display = mode === MODE_SINGLE && !wheelOpen && !explainOpen ? "block" : "none";
   // 対象を選んでいる間、照準はもう対象を決めていないので薄くする
   // (理由: docs/adr/0020-arrow-target-navigation.md)
   reticle.classList.toggle("dim", !!sel);

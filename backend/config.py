@@ -190,3 +190,11 @@ PORT: int = _int("PORT", 8100)
 STREAM_FPS: int = _int("STREAM_FPS", 15)
 # MJPEGデバッグ映像のJPEG品質(1-100)。
 JPEG_QUALITY: int = _int("JPEG_QUALITY", 70)
+
+# --- AI説明 ---
+# 単体鑑定で固定した物体の説明文をローカルLLM(Ollama)で生成する。
+# モデル選定の経緯: docs/adr/0024-llm-object-explanation.md
+OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
+# 生成完了を待つ上限秒。初回生成は実機で約7.5秒かかるため20秒以上を推奨。
+EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 30.0)
