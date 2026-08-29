@@ -154,12 +154,20 @@ def _ollama_explain(label: str, ja: str | None) -> str:
     実行し、イベントループを塞がない。
     """
     name = ja if ja else label
+    # 鑑定士の人物像と2分岐ルール(昔からの道具は素直に/科学の産物は遺物として
+    # 正体を明かさない)は実測で調整した。世界観の理由: docs/adr/0024-llm-object-explanation.md
     prompt = (
-        "次の物体について日本語で説明してください。\n"
+        "あなたは剣と魔法の異世界の「無口な職人鑑定士」。口数が少なく、"
+        "事実と評価のみを淡々と述べる。今まさに手元にある物体を鑑定し、日本語でつぶやく。\n"
         f"物体名: {name} ({label})\n"
-        "- 2〜3文で書く\n"
-        "- 見出し・太字(*)・箇条書きなどの装飾記法は使わない\n"
-        "- 説明文だけを出力する(前置きや挨拶は書かない)"
+        "判定のルール:\n"
+        "- 傘・杯・剣・本・果物など、文明の如何を問わず昔から存在しうる道具 → "
+        "正体を素直に言い当て、用途や価値を語る。過度な神秘化はしない\n"
+        "- 電気・機械・科学技術の産物(PC・携帯・カメラ・車など) → "
+        "「古代文明の遺物」「謎の物体」として、正体を直接明かさず、"
+        "見た目の観察と推測・畏怖を交えて語る\n"
+        "- 2〜3文。感嘆詞(ふむ・ほう等)は使わない\n"
+        "- 見出し・太字(*)・箇条書きなどの装飾記法は使わず、鑑定文だけを出力する"
     )
     # think:false は必須。付けないと英語の思考トレースが出て、時間も余計にかかる
     # (理由: docs/adr/0024-llm-object-explanation.md)
@@ -168,7 +176,7 @@ def _ollama_explain(label: str, ja: str | None) -> str:
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.3, "num_predict": 150},
+        "options": {"temperature": 0.4, "num_predict": 150},
     }).encode("utf-8")
     req = urllib.request.Request(
         f"{config.OLLAMA_URL.rstrip('/')}/api/chat",
@@ -183,12 +191,12 @@ def _ollama_explain(label: str, ja: str | None) -> str:
         # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける
         raise HTTPException(
             status_code=503,
-            detail="Ollama に接続できません。起動を確認してください (ollama serve)",
+            detail="鑑定の力 (Ollama) に接続できません。起動を確認してください (ollama serve)",
         ) from e
     text = (data.get("message") or {}).get("content", "").strip()
     if not text:
         raise HTTPException(
-            status_code=503, detail="説明文の生成が空でした。もう一度お試しください"
+            status_code=503, detail="鑑定文の生成が空でした。もう一度お試しください"
         )
     return text
 

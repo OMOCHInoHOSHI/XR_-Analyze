@@ -538,7 +538,7 @@ function openExplain(target) {
   if (cached !== undefined) {
     eBody.textContent = cached;
   } else {
-    eBody.textContent = "説明を生成中…";
+    eBody.textContent = "鑑定中…";
     requestExplain(target.label, target.label_ja || target.label);
   }
   renderExplain();
@@ -563,7 +563,7 @@ function requestExplain(label, name) {
     .then((r) => {
       if (!r.ok) {
         // 503 の detail(日本語メッセージ)をそのまま窓に載せるため拾う
-        return r.json().then((d) => { throw new Error(d.detail || "説明の生成に失敗しました"); });
+        return r.json().then((d) => { throw new Error(d.detail || "鑑定に失敗しました"); });
       }
       return r.json();
     })
@@ -573,8 +573,8 @@ function requestExplain(label, name) {
     })
     .catch((err) => {
       if (!(explainOpen && explainLabel === label)) return;
-      eBody.textContent = err.message || "説明の生成に失敗しました";
-      setToast("AI説明に失敗しました ── Ollama が起動しているか確認してください", 3000);
+      eBody.textContent = err.message || "鑑定に失敗しました";
+      setToast("鑑定に失敗しました ── Ollama が起動しているか確認してください", 3000);
     });
 }
 
