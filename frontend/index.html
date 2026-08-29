@@ -64,7 +64,7 @@
   .p-key { opacity: .6; margin-right: 12px; }
   #p-modename::before { content: "◇ "; }
   /* 調整モード中だけ開くキー案内。既定は閉じたまま。
-     鑑定法の選択肢は円盤 (#wheel) へ移した (理由: docs/adr/0019-key-binding-policy-v2.md) */
+     モードの選択肢は円盤 (#wheel) へ移した (理由: docs/adr/0021-mode-wheel-with-calibration.md) */
   .p-calib { display: none; margin-top: 3px; }
   .p-calib div { white-space: nowrap; }
   .p-ck { display: inline-block; min-width: 5.6em; opacity: .75; }
@@ -89,12 +89,14 @@
     border: 1px solid var(--c); opacity: .6;
     background: radial-gradient(closest-side,
       rgba(0, 14, 22, .74) 74%, rgba(0, 14, 22, 0) 100%); }
-  /* 環の上下の菱形。意匠 六 のあしらいと揃える。 */
+  /* 環の左右の菱形。意匠 六 のあしらいと揃える。項目は 12時から等間隔に並ぶので、
+     上下に置くと項目の下に隠れる (2件なら 12時/6時、3件なら 12時)。左右なら
+     2件でも3件でも項目と重ならない。 */
   .w-ring::before, .w-ring::after { content: ""; position: absolute;
-    left: 50%; width: 8px; height: 8px; background: var(--c);
+    top: 50%; width: 8px; height: 8px; background: var(--c);
     transform: translate(-50%, -50%) rotate(45deg); }
-  .w-ring::before { top: 0; }
-  .w-ring::after { top: 100%; }
+  .w-ring::before { left: 0; }
+  .w-ring::after { left: 100%; }
   /* 中央の見出し。照準と重なるため、盤を開いている間は照準を消す。 */
   .w-hub { position: absolute; left: 50%; top: 50%; width: 100%;
     transform: translate(-50%, -50%); text-align: center;
@@ -358,11 +360,11 @@
   <img id="video" src="/video?annotate=0" alt="debug video" />
   <div id="overlay"></div>
   <div id="reticle"></div>
-  <!-- 鑑定法のモードセレクト。環と見出しだけ置き、円周上の項目は起動時に
-       JS が MODES から作る (理由: docs/adr/0019-key-binding-policy-v2.md) -->
+  <!-- モードセレクト。環と見出しだけ置き、円周上の項目は起動時に JS が MODES
+       から作る (理由: docs/adr/0021-mode-wheel-with-calibration.md) -->
   <div id="wheel">
     <i class="w-ring"></i>
-    <div class="w-hub"><b>鑑 定 法</b>数字で確定 / ←↑↓→ と Enter</div>
+    <div class="w-hub"><b>モ ー ド</b>数字で確定 / ←↑↓→ と Enter</div>
   </div>
   <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
        (検出名を扱うため innerHTML は使わない)。 -->
@@ -388,7 +390,8 @@
 
 <script>
 // キー操作:
-//   m        : 鑑定盤(円盤)を開く。数字で即確定 / ←↑↓→ で選び Enter で確定
+//   m        : モードの円盤を開く (単体鑑定 / 広域鑑定 / 調整)。
+//              数字で即確定 / ←↑↓→ で選び Enter で確定。調整モード中も効く
 //   ←↑↓→    : 単体鑑定で対象を選び替える(その向きにある最も近い検出へ)
 //   Enter    : 選んでいる対象に鑑定を固定 / 固定を解除
 //   Esc      : 選択・固定を解除して照準ベースに戻す
@@ -424,17 +427,21 @@ const STEP_OFFSET = 0.01;
 const MODE_SINGLE = "single";
 const MODE_MULTI = "multi";
 const MULTI_MAX = 10;
-// 円盤の並び順・数字キーの割り当て・表示名はこの配列が唯一の出所。鑑定法を
+// 調整は鑑定法ではないが、利用者から見れば「今どのモードにいるか」は同じ問いなので
+// 円盤に並べる (理由: docs/adr/0021-mode-wheel-with-calibration.md)
+const MODE_CALIB = "calib";
+// 円盤の並び順・数字キーの割り当て・表示名はこの配列が唯一の出所。モードを
 // 足すときはここに1行足せば、円盤の配置もキーも案内文も追従する。
 const MODES = [
   { id: MODE_SINGLE, key: "1", num: "壱", name: "単体鑑定" },
   { id: MODE_MULTI, key: "2", num: "弐", name: "広域鑑定" },
+  { id: MODE_CALIB, key: "3", num: "参", name: "調整" },
 ];
 const MODE_LABEL = {};
 for (const m of MODES) MODE_LABEL[m.id] = m.name;
 let mode = MODE_MULTI;
 
-// --- 鑑定盤の円盤 -----------------------------------------------------------
+// --- モードの円盤 -----------------------------------------------------------
 // 'm' で画面中央に開く。数字なら即確定、矢印はカーソルを動かして Enter で確定。
 // 開いている間はすべてのキーを盤の操作として吸収し、本来の機能は動かさない
 // (理由: docs/adr/0019-key-binding-policy-v2.md)
@@ -560,6 +567,35 @@ function setMode(next) {
   );
 }
 
+// 円盤が「現在」として指すモード。鑑定法と調整は排他に扱うので常に1つに決まる
+// (理由: docs/adr/0021-mode-wheel-with-calibration.md)
+function activeMode() {
+  return calibMode ? MODE_CALIB : mode;
+}
+
+// 円盤で選んだモードを適用する。調整を選べば鑑定法は覚えたまま調整へ入り、
+// 鑑定法を選べば調整から抜ける。どちらも「選び直しただけ」なら解除はしない。
+function selectMode(id) {
+  if (id === MODE_CALIB) {
+    if (calibMode) {
+      toast("調整 ── 変更なし");
+      return;
+    }
+    setCalibMode(true);
+    return;
+  }
+  if (calibMode) {
+    // 鑑定法を選んだので調整から抜ける。setCalibMode は終了の報せを出すため、
+    // ここでは旗だけ倒して報せは鑑定法側にまとめる。
+    calibMode = false;
+    if (id === mode) {
+      toast(`調整を終えて ${MODE_LABEL[id]} へ`);
+      return;
+    }
+  }
+  setMode(id);
+}
+
 // 円盤の項目を作って円周上に並べる。角度は項目数から出すので、MODES に足すだけで
 // 配置が追従する。12時から時計回りに等間隔。
 function buildWheel() {
@@ -593,7 +629,7 @@ function renderWheel() {
   wheel.classList.toggle("on", wheelOpen);
   for (let i = 0; i < wheelItems.length; i++) {
     wheelItems[i].classList.toggle("on", i === wheelCursor);
-    wheelItems[i].classList.toggle("cur", MODES[i].id === mode);
+    wheelItems[i].classList.toggle("cur", MODES[i].id === activeMode());
   }
 }
 
@@ -609,8 +645,8 @@ function bumpWheelTimer() {
 
 function openWheel() {
   wheelOpen = true;
-  // カーソルは今の鑑定法から始める。Enter を空打ちしても何も変わらない。
-  wheelCursor = Math.max(0, MODES.findIndex((m) => m.id === mode));
+  // カーソルは今いるモードから始める。Enter を空打ちしても何も変わらない。
+  wheelCursor = Math.max(0, MODES.findIndex((m) => m.id === activeMode()));
   bumpWheelTimer();
   renderWheel();
   repaint();  // 照準を消す(盤の中央見出しと重なるため)
@@ -642,24 +678,24 @@ function onWheelKey(e) {
   }
   if (e.key === "Enter") {
     closeWheel();
-    setMode(MODES[wheelCursor].id);
+    selectMode(MODES[wheelCursor].id);
     return;
   }
   const i = MODES.findIndex((m) => m.key === e.key);
   if (i >= 0) {
     closeWheel();
-    setMode(MODES[i].id);
+    selectMode(MODES[i].id);
     return;
   }
   // 'm' や Esc を含め、それ以外のキーは取り消しにだけ使う。
   closeWheel();
-  toast("鑑定法の選択を取り消しました");
+  toast("モードの選択を取り消しました");
 }
 
 function setCalibMode(on) {
   calibMode = on;
   toast(
-    on ? "調整モード ── ←↑↓→:位置  +/-:ズーム  s:保存  c/Esc:終了"
+    on ? "調整モード ── ←↑↓→:位置  +/-:ズーム  s:保存  m:モード  c/Esc:終了"
        : "調整モードを終了",
     on ? 3000 : 1600
   );
@@ -736,7 +772,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  // 調整モード中は調整のキーだけを見る。鑑定の操作(m/Enter/矢印の選択)は動かさない。
+  // 調整モード中は調整のキーだけを見る。鑑定の操作(Enter/矢印の選択)は動かさない。
+  // 例外は 'm' で、円盤から調整を抜けるために効かせる。
   if (calibMode) {
     switch (e.key) {
       // 切り抜き位置を動かす向き。↑ なら「より上」が見えるようになる
@@ -767,6 +804,11 @@ document.addEventListener("keydown", (e) => {
         break;
       case "c": case "Escape":
         setCalibMode(false);
+        break;
+      // 円盤に調整を載せた以上、そこから戻れないと入口だけ片道になる。鑑定の操作で
+      // 調整中も効くのは 'm' だけ (理由: docs/adr/0021-mode-wheel-with-calibration.md)
+      case "m":
+        openWheel();
         break;
       // 映像のON/OFFは調整と直交する(映像を見ながら合わせる)ので調整中も効かせる。
       case "d":
@@ -1043,10 +1085,10 @@ function render(payload) {
   const themePart = DEBUG_THEME_KEYS
     ? ` | 意匠 ${THEMES[themeIndex].name}(1-${THEMES.length}で切替)` : "";
   const hint = calibMode
-    ? ` | 調整中: ←↑↓→:位置  +/-:ズーム  0:リセット  s:保存  c/Esc:終了`
+    ? ` | 調整中: ←↑↓→:位置  +/-:ズーム  0:リセット  s:保存  m:モード  c/Esc:終了`
     : mode === MODE_SINGLE
-    ? ` | m:鑑定法  ←↑↓→:対象選択  Enter:固定  Esc:解除  c:調整  'd':映像`
-    : ` | m:鑑定法  c:調整  'd':映像`;
+    ? ` | m:モード  ←↑↓→:対象選択  Enter:固定  Esc:解除  c:調整  'd':映像`
+    : ` | m:モード  c:調整  'd':映像`;
   // 表示は絞っても objects は検出総数を出す(絞り込みで見えていない数が分かる)。
   hud.textContent =
     `fps ${payload.fps} | objects ${payload.detections.length}` +

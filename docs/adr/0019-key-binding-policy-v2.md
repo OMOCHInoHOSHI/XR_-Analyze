@@ -1,8 +1,8 @@
 # ADR-0019: 矢印キーは鑑定の操作に充て、映像の調整は 'c' の中へ隔離する
 
-- ステータス: 承認済み
+- ステータス: 置換 (ADR-0021 による)
 - 記録日: 2026-08-29
-- 関連: [ADR-0007](0007-viewport-crop-calibration.md), [ADR-0010](0010-client-side-display-policy.md), [ADR-0014](0014-box-theme-and-dom-reuse.md), [ADR-0015](0015-key-binding-policy.md), [ADR-0020](0020-arrow-target-navigation.md)
+- 関連: [ADR-0007](0007-viewport-crop-calibration.md), [ADR-0010](0010-client-side-display-policy.md), [ADR-0014](0014-box-theme-and-dom-reuse.md), [ADR-0015](0015-key-binding-policy.md), [ADR-0020](0020-arrow-target-navigation.md), [ADR-0021](0021-mode-wheel-with-calibration.md)
 
 ## 文脈
 
