@@ -89,25 +89,41 @@
     border: 1px solid var(--c); opacity: .6;
     background: radial-gradient(closest-side,
       rgba(0, 14, 22, .74) 74%, rgba(0, 14, 22, 0) 100%); }
-  /* 環の左右の菱形。意匠 六 のあしらいと揃える。項目は 12時から等間隔に並ぶので、
-     上下に置くと項目の下に隠れる (2件なら 12時/6時、3件なら 12時)。左右なら
-     2件でも3件でも項目と重ならない。 */
+  /* 環の左右の菱形。項目は 12時に来るので、上下に置くと隠れる。左右なら重ならない。 */
   .w-ring::before, .w-ring::after { content: ""; position: absolute;
     top: 50%; width: 8px; height: 8px; background: var(--c);
     transform: translate(-50%, -50%) rotate(45deg); }
   .w-ring::before { left: 0; }
   .w-ring::after { left: 100%; }
+  /* 12時の指標。盤が回って、選んでいるものが必ずここへ来る
+     (理由: docs/adr/0023-rotating-mode-wheel.md) */
+  .w-mark { position: absolute; left: 50%; top: 0;
+    width: 12px; height: 12px; background: var(--c);
+    box-shadow: 0 0 10px var(--c);
+    transform: translate(-50%, -50%) rotate(45deg); }
+  /* 項目を載せる回転体。これを回すことで項目が円周上を滑る。
+     left/top を動かすと円周ではなく弦を突っ切ってしまうため、親ごと回す。 */
+  .w-rotor { position: absolute; inset: 0;
+    transition: transform .3s cubic-bezier(.22, .61, .36, 1); }
   /* 中央の見出し。照準と重なるため、盤を開いている間は照準を消す。 */
   .w-hub { position: absolute; left: 50%; top: 50%; width: 100%;
     transform: translate(-50%, -50%); text-align: center;
     font-size: 12px; opacity: .7; }
   .w-hub b { display: block; font-size: 16px; font-weight: 700;
     letter-spacing: .3em; margin-bottom: 3px; }
-  /* 円周上の項目。left/top は JS が入れる。 */
+  /* 円周上の項目。left/top は JS が入れる。盤が回ると項目も一緒に回ってしまうので、
+     JS が同じ角度だけ逆に回して文字を水平に保つ。 */
   .w-item { position: absolute; transform: translate(-50%, -50%);
     white-space: nowrap; font-size: 17px; padding: 5px 14px;
     border: 1px solid transparent; background: rgba(0, 14, 22, .55);
-    opacity: .5; }
+    opacity: .5;
+    transition: transform .3s cubic-bezier(.22, .61, .36, 1), opacity .3s ease; }
+  /* 動きを控える設定では、回転も開くときの拡大も止める。回転だけ止めても
+     盤を開くたびに動くので、揃えないと意味がない。 */
+  @media (prefers-reduced-motion: reduce) {
+    .w-rotor, .w-item { transition: none; }
+    #wheel.on { animation: none; }
+  }
   .w-num { margin-right: .1em; }
   .w-key { font-size: 11px; opacity: .7; margin: 0 .6em 0 .3em; }
   .w-key::before { content: "["; }
@@ -364,6 +380,7 @@
        から作る (理由: docs/adr/0021-mode-wheel-with-calibration.md) -->
   <div id="wheel">
     <i class="w-ring"></i>
+    <i class="w-mark"></i>
     <div class="w-hub"><b>モ ー ド</b>数字で確定 / ←↑↓→ と Enter</div>
   </div>
   <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
@@ -393,8 +410,7 @@
 // キー操作:
 //   m        : モードの円盤を開く (単体鑑定 / 広域鑑定 / 調整)。
 //              数字で即確定 / ←↑↓→ で選び Enter で確定。調整モード中も効く
-//   ←↑↓→    : 単体鑑定で対象を選び替える(→ は左から右、↓ は上から下の順。
-//              押し続けると次々に移り、端まで行くと反対の端へ回り込む)
+//   ←↑↓→    : 単体鑑定で対象を選び替える(その向きにある最も近い検出へ)
 //   Enter    : 選んでいる対象に鑑定を固定 / 固定を解除
 //   Esc      : 選択・固定を解除して照準ベースに戻す
 //   c        : 調整モードの出入り(ズーム・切り抜き位置・保存はこの中だけ)
@@ -451,8 +467,12 @@ let mode = MODE_MULTI;
 const WHEEL_MS = 3000;   // 無操作での自動キャンセル。キー操作のたびに延長する
 const WHEEL_R = 34;      // 環の半径。#wheel の一辺に対する %
 let wheelOpen = false;
-let wheelCursor = 0;     // Enter で確定する項目
+let wheelCursor = 0;     // Enter で確定する項目 = 12時の指標に来ているもの
 let wheelTimer = null;
+// 盤の回転角(度)。足し引きで持つので、一周しても巻き戻らず同じ向きへ回り続ける
+// (理由: docs/adr/0023-rotating-mode-wheel.md)
+let wheelTurn = 0;
+let wheelRotor = null;   // 項目を載せる回転体
 const wheelItems = [];   // 円周上の項目。起動時に1回だけ作る
 
 // --- 調整モード -------------------------------------------------------------
@@ -602,6 +622,8 @@ function selectMode(id) {
 // 円盤の項目を作って円周上に並べる。角度は項目数から出すので、MODES に足すだけで
 // 配置が追従する。12時から時計回りに等間隔。
 function buildWheel() {
+  wheelRotor = document.createElement("div");
+  wheelRotor.className = "w-rotor";
   MODES.forEach((m, i) => {
     const el = document.createElement("div");
     el.className = "w-item";
@@ -620,17 +642,33 @@ function buildWheel() {
     const a = ((-90 + (360 / MODES.length) * i) * Math.PI) / 180;
     el.style.left = (50 + Math.cos(a) * WHEEL_R) + "%";
     el.style.top = (50 + Math.sin(a) * WHEEL_R) + "%";
-    wheel.appendChild(el);
+    wheelRotor.appendChild(el);
     wheelItems.push(el);
   });
+  wheel.appendChild(wheelRotor);
 }
 buildWheel();
+
+// 項目1つ分の角度と、その項目を 12時へ持ってくるための盤の角度。
+const wheelStep = () => 360 / MODES.length;
+const wheelAngleFor = (i) => -i * wheelStep();
+
+// 隣へ1つ回す。delta は +1 が次、-1 が前。
+function turnBy(delta) {
+  const n = MODES.length;
+  wheelCursor = (wheelCursor + delta + n) % n;
+  wheelTurn -= delta * wheelStep();
+}
 
 // 円盤の見た目だけを更新する。WSペイロードに依存しないので、まだ1フレームも
 // 受け取っていない状態で 'm' を押しても開ける (repaint() は payload 待ちのため)。
 function renderWheel() {
   wheel.classList.toggle("on", wheelOpen);
+  wheelRotor.style.transform = `rotate(${wheelTurn}deg)`;
+  // 盤の回転を打ち消して、項目の文字は常に水平に保つ。
+  const upright = `translate(-50%, -50%) rotate(${-wheelTurn}deg)`;
   for (let i = 0; i < wheelItems.length; i++) {
+    wheelItems[i].style.transform = upright;
     wheelItems[i].classList.toggle("on", i === wheelCursor);
     wheelItems[i].classList.toggle("cur", MODES[i].id === activeMode());
   }
@@ -648,8 +686,10 @@ function bumpWheelTimer() {
 
 function openWheel() {
   wheelOpen = true;
-  // カーソルは今いるモードから始める。Enter を空打ちしても何も変わらない。
+  // 今いるモードが指標に来た状態で開く。Enter を空打ちしても何も変わらない。
   wheelCursor = Math.max(0, MODES.findIndex((m) => m.id === activeMode()));
+  // 閉じている間は transition が働かないので、ここで直に合わせれば回らずに出る。
+  wheelTurn = wheelAngleFor(wheelCursor);
   bumpWheelTimer();
   renderWheel();
   repaint();  // 照準を消す(盤の中央見出しと重なるため)
@@ -665,16 +705,15 @@ function closeWheel() {
 // (理由: docs/adr/0019-key-binding-policy-v2.md)
 function onWheelKey(e) {
   e.preventDefault();
-  const n = MODES.length;
-  // カーソルは円周を回る。→↓ が次、←↑ が前。
+  // 盤そのものを回す。→↓ で次が、←↑ で前が、12時の指標へ滑ってくる。
   if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-    wheelCursor = (wheelCursor + 1) % n;
+    turnBy(1);
     bumpWheelTimer();
     renderWheel();
     return;
   }
   if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-    wheelCursor = (wheelCursor + n - 1) % n;
+    turnBy(-1);
     bumpWheelTimer();
     renderWheel();
     return;
@@ -717,18 +756,16 @@ function navigate(key) {
     return;
   }
   if (!lastPayload) return;
-  const hit = navTarget(lastPayload.detections, NAV_DIR[key]);
-  if (!hit) {
+  const next = navTarget(lastPayload.detections, viewRect(), NAV_DIR[key]);
+  if (!next) {
     toast("その向きに対象がありません");
     return;
   }
-  const next = hit.det;
   sel = { ...next };
   selLocked = false;
   selLostAt = 0;
   clearTimeout(selGraceTimer);
-  // 一周したことを出さないと、端で「なぜ逆へ飛んだのか」が分からない。
-  toast(`選択 ── ${next.label_ja || next.label}${hit.wrapped ? " (一周)" : ""}`);
+  toast(`選択 ── ${next.label_ja || next.label}`);
 }
 
 function toggleLock() {
@@ -924,60 +961,45 @@ function gazeTarget(dets, r) {
 }
 
 // --- 矢印による対象の選び替え -----------------------------------------------
-// 軸に沿って並べた輪を回す。→ は x が大きい方へ、↓ は y が大きい方へ「次」を探し、
-// その向きに尽きたら反対の端へ回り込む。押し続けるだけで視界の検出を順に巡れる
-// (理由: docs/adr/0022-arrow-navigation-wraps.md)
+// 画面座標での向き。↑ が -y。
 const NAV_DIR = {
-  ArrowRight: { axis: "x", step: 1 },
-  ArrowLeft: { axis: "x", step: -1 },
-  ArrowDown: { axis: "y", step: 1 },
-  ArrowUp: { axis: "y", step: -1 },
+  ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
 };
+// 進む向きから横にずれた分をどれだけ嫌うか。大きいほど「まっすぐ隣」を選ぶ
+const NAV_CROSS_WEIGHT = 2;
+// 中心がほぼ同じものを「その向きにある」と扱わないための最小値(表示ピクセル)
+const NAV_MIN_PX = 2;
+// 横ずれを許す上限。前進量の何倍まで「その向きにある」と認めるか(2 = 約63°)。
+// 減点だけで足切りしないと、真横に大きく離れた検出が「わずかに前」という理由で
+// 勝ってしまう。前進 5px・横 278px の検出が、前進 400px の真上の検出に勝つ事象を
+// テストで確認した (理由: docs/adr/0020-arrow-target-navigation.md)
+const NAV_CONE = 2;
 
-// 軸に沿った位置。→/← は x、↑/↓ は y だけを見る。順序を見るだけなので正規化座標の
-// ままでよい (表示ピクセルへの変換は軸ごとの単調な拡大で、大小関係を変えない。
-//  距離を測るときは表示ピクセルが要る: docs/adr/0011-gaze-target-selection.md)
-function navPos(d, axis) {
-  return axis === "x" ? d.x + d.w / 2 : d.y + d.h / 2;
-}
-
-// 軸の位置が厳密に並んだときの控えの順序。もう一方の軸 → ラベル の順に見て一意に
-// 決める。サーバは座標を小数5桁に丸めて配信するため (backend/detector.py,
-// backend/stabilizer.py)、厳密な一致は起こりうるがまれ。起きたときは2件が同じ軸位置を
-// 共有するので、片方はその軸の巡回に入らない。もう一方の軸で拾う。
-function navTieLess(a, b, axis) {
-  const pa = axis === "x" ? a.y + a.h / 2 : a.x + a.w / 2;
-  const pb = axis === "x" ? b.y + b.h / 2 : b.x + b.w / 2;
-  return pa !== pb ? pa < pb : a.label < b.label;
-}
-
-// 今の対象(無ければ照準)を起点に、軸に沿った次の検出を返す。
-// 戻り値は { det, wrapped } か null。wrapped は端から反対の端へ回り込んだことを表す。
-//
-// 軸の位置が起点と厳密に等しい検出は「次」に選ばない。真上に重なった物へ → で
-// 移ると、押した向きと動く向きが食い違うため。そちらは ↑↓ で拾う。
-function navTarget(dets, dir) {
+// 今の対象(無ければ照準)から見て、指定の向きにある最も近い検出を返す。
+// 距離は表示ピクセルで測る (理由: docs/adr/0011-gaze-target-selection.md)。
+// 半径 (GAZE_RADIUS) では絞らない。矢印は「意図して選びに行く」操作なので、
+// 照準から遠い対象へも届かせる (理由: docs/adr/0020-arrow-target-navigation.md)
+function navTarget(dets, r, dir) {
   if (!dir) return null;
-  const axis = dir.axis, fwd = dir.step;
-  const here = (currentTarget ? navPos(currentTarget, axis) : 0.5) * fwd;
-  let next = null, nextPos = 0;   // 進む向きで最も手前 = 次の対象
-  let far = null, farPos = 0;     // 反対向きで最も遠い = 一周したときの行き先
+  const ux = dir[0], uy = dir[1];
+  const cur = currentTarget;
+  const cx = (cur ? cur.x + cur.w / 2 : 0.5) * r.w;
+  const cy = (cur ? cur.y + cur.h / 2 : 0.5) * r.h;
+  let best = null, bestScore = Infinity;
   for (const d of dets) {
-    const p = navPos(d, axis) * fwd;
-    if (p > here) {
-      if (!next || p < nextPos || (p === nextPos && navTieLess(d, next, axis))) {
-        next = d;
-        nextPos = p;
-      }
-    } else if (p < here) {
-      if (!far || p < farPos || (p === farPos && navTieLess(d, far, axis))) {
-        far = d;
-        farPos = p;
-      }
+    const px = (d.x + d.w / 2) * r.w, py = (d.y + d.h / 2) * r.h;
+    const main = (px - cx) * ux + (py - cy) * uy;             // 進む向きの成分
+    if (main <= NAV_MIN_PX) continue;   // 真横・後ろ・自分自身は候補にしない
+    const cross = Math.abs((px - cx) * uy - (py - cy) * ux);  // 横にずれた分
+    if (cross > main * NAV_CONE) continue;   // 向きから外れすぎたものは候補にしない
+    const score = main + cross * NAV_CROSS_WEIGHT;
+    // 同点なら信頼度の高い方。ちらつきの原因になる同点を残さない。
+    if (score < bestScore || (score === bestScore && best && d.confidence > best.confidence)) {
+      bestScore = score;
+      best = d;
     }
   }
-  if (next) return { det: next, wrapped: false };
-  return far ? { det: far, wrapped: true } : null;
+  return best;
 }
 
 // 選択/固定中の枠に対応する検出を探す。ラベル一致を優先し、揺れたら重なりで拾い直す
