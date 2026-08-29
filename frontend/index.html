@@ -34,6 +34,9 @@
     transform: rotate(45deg); opacity: .55; }
   #reticle::after { content: ""; position: absolute; left: 50%; top: 50%;
     width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; background: var(--c); }
+  /* 矢印で対象を選んでいる間は、照準が対象を決めていない。薄くして
+     「今は照準を見ていない」ことを示す (理由: docs/adr/0020-arrow-target-navigation.md) */
+  #reticle.dim { opacity: .14; }
 
   /* --- 鑑定盤 (モード表示と鑑定法の選択) ---
      色(--c)と書体(--face)は意匠から受け取るので、盤も意匠に合わせて変わる。
@@ -60,16 +63,63 @@
   .p-title { font-weight: 700; }
   .p-key { opacity: .6; margin-right: 12px; }
   #p-modename::before { content: "◇ "; }
-  /* 'm' を押している間だけ開く。既定は閉じたまま。 */
-  .p-opts { display: none; margin-top: 3px; }
-  .p-opt { white-space: nowrap; }
-  .p-num { display: inline-block; min-width: 2.6em; }
-  .p-num::before { content: "◇ "; }
+  /* 調整モード中だけ開くキー案内。既定は閉じたまま。
+     鑑定法の選択肢は円盤 (#wheel) へ移した (理由: docs/adr/0019-key-binding-policy-v2.md) */
+  .p-calib { display: none; margin-top: 3px; }
+  .p-calib div { white-space: nowrap; }
+  .p-ck { display: inline-block; min-width: 5.6em; opacity: .75; }
+  .p-ck::before { content: "◇ "; }
   .p-msg { display: none; margin-top: 3px; opacity: .9; }
   /* デバッグ行(fps・調整値・意匠・キー一覧)。盤の下に小さく置く。 */
   #hud { margin-top: 6px; font-size: 12px; opacity: .75; color: var(--c);
     text-shadow: 0 0 2px #000; letter-spacing: 0;
     font-family: -apple-system, "Helvetica Neue", sans-serif; }
+
+  /* --- 鑑定盤の円盤 ('m' で開く鑑定法のモードセレクト) ---
+     画面中央に環を出し、円周上に鑑定法を等間隔で並べる。項目の座標は
+     JS が MODES から計算するので、鑑定法を足してもここは触らなくてよい。
+     色(--c)と書体(--face)は意匠から受け取るので、盤も意匠に合わせて変わる。 */
+  #wheel { position: absolute; left: 50%; top: 50%;
+    width: 44vmin; height: 44vmin; margin: -22vmin 0 0 -22vmin;
+    display: none; pointer-events: none;
+    font-family: var(--face); color: var(--c); letter-spacing: .12em; }
+  #wheel.on { display: block; animation: wheel-in .16s ease-out; }
+  /* 環。内側だけを暗く落とし、環の外の視界は塞がない。 */
+  .w-ring { position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid var(--c); opacity: .6;
+    background: radial-gradient(closest-side,
+      rgba(0, 14, 22, .74) 74%, rgba(0, 14, 22, 0) 100%); }
+  /* 環の上下の菱形。意匠 六 のあしらいと揃える。 */
+  .w-ring::before, .w-ring::after { content: ""; position: absolute;
+    left: 50%; width: 8px; height: 8px; background: var(--c);
+    transform: translate(-50%, -50%) rotate(45deg); }
+  .w-ring::before { top: 0; }
+  .w-ring::after { top: 100%; }
+  /* 中央の見出し。照準と重なるため、盤を開いている間は照準を消す。 */
+  .w-hub { position: absolute; left: 50%; top: 50%; width: 100%;
+    transform: translate(-50%, -50%); text-align: center;
+    font-size: 12px; opacity: .7; }
+  .w-hub b { display: block; font-size: 16px; font-weight: 700;
+    letter-spacing: .3em; margin-bottom: 3px; }
+  /* 円周上の項目。left/top は JS が入れる。 */
+  .w-item { position: absolute; transform: translate(-50%, -50%);
+    white-space: nowrap; font-size: 17px; padding: 5px 14px;
+    border: 1px solid transparent; background: rgba(0, 14, 22, .55);
+    opacity: .5; }
+  .w-num { margin-right: .1em; }
+  .w-key { font-size: 11px; opacity: .7; margin: 0 .6em 0 .3em; }
+  .w-key::before { content: "["; }
+  .w-key::after { content: "]"; }
+  /* カーソル位置 = Enter を押したときに確定する項目。 */
+  .w-item.on { opacity: 1; border-color: var(--c);
+    box-shadow: 0 0 14px rgba(255, 255, 255, .16); }
+  /* 今選んでいる鑑定法。カーソルとは別物なので印で区別する。 */
+  .w-now { display: none; font-size: 11px; opacity: .85; margin-left: .7em; }
+  .w-now::before { content: "◇ "; }
+  .w-item.cur .w-now { display: inline; }
+  @keyframes wheel-in {
+    from { opacity: 0; transform: scale(.9); }
+    to { opacity: 1; transform: scale(1); } }
 
   /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
   .box { position: absolute; box-sizing: border-box;
@@ -79,6 +129,10 @@
   /* 見失い中(猶予時間内)は破線+半透明。「まだ解除されていないが追従できていない」
      ことを示す。猶予を過ぎると自動で解除され通常の枠に戻る。 */
   .box.lost { --c: var(--c-lost); opacity: .5; border-style: dashed; }
+  /* 矢印で選んだ対象。照準が決めた対象と見分けられるよう外側に破線を出す。
+     outline はどの意匠も使っていないので、意匠を足すときの負担にならない
+     (理由: docs/adr/0020-arrow-target-navigation.md) */
+  .box.picked { outline: 1px dashed var(--c); outline-offset: 6px; }
   /* 色は --c を「使う側の要素」で直接参照する (理由: docs/adr/0014-box-theme-and-dom-reuse.md) */
   .label { position: absolute; transform: translateY(-100%);
     background: var(--c); color: #000;
@@ -304,6 +358,12 @@
   <img id="video" src="/video?annotate=0" alt="debug video" />
   <div id="overlay"></div>
   <div id="reticle"></div>
+  <!-- 鑑定法のモードセレクト。環と見出しだけ置き、円周上の項目は起動時に
+       JS が MODES から作る (理由: docs/adr/0019-key-binding-policy-v2.md) -->
+  <div id="wheel">
+    <i class="w-ring"></i>
+    <div class="w-hub"><b>鑑 定 法</b>数字で確定 / ←↑↓→ と Enter</div>
+  </div>
   <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
        (検出名を扱うため innerHTML は使わない)。 -->
   <div id="ui">
@@ -313,9 +373,12 @@
         <span class="p-title">鑑 定 眼</span><span id="p-state">待機</span>
       </div>
       <div><span class="p-key">鑑定法</span><span id="p-modename">広域鑑定</span></div>
-      <div class="p-opts" id="p-opts">
-        <div class="p-opt"><span class="p-num">壱</span>単体鑑定</div>
-        <div class="p-opt"><span class="p-num">弐</span>広域鑑定</div>
+      <div class="p-calib" id="p-calib">
+        <div><span class="p-ck">←↑↓→</span>切り抜き位置</div>
+        <div><span class="p-ck">+ / -</span>ズーム</div>
+        <div><span class="p-ck">0</span>リセット</div>
+        <div><span class="p-ck">s</span>保存</div>
+        <div><span class="p-ck">c / Esc</span>調整を終える</div>
       </div>
       <div class="p-msg" id="p-msg"></div>
     </div>
@@ -325,43 +388,67 @@
 
 <script>
 // キー操作:
-//   m → 1/2 : 鑑定法の切替 (1:単体鑑定 / 2:広域鑑定)
-//   Enter    : 単体鑑定で鑑定を固定/解除 (Escでも解除)
+//   m        : 鑑定盤(円盤)を開く。数字で即確定 / ←↑↓→ で選び Enter で確定
+//   ←↑↓→    : 単体鑑定で対象を選び替える(その向きにある最も近い検出へ)
+//   Enter    : 選んでいる対象に鑑定を固定 / 固定を解除
+//   Esc      : 選択・固定を解除して照準ベースに戻す
+//   c        : 調整モードの出入り(ズーム・切り抜き位置・保存はこの中だけ)
 //   d        : デバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
-//   + / = / -: デジタルズームの増減
-//   ↑↓←→    : 切り抜き位置(表示位置)の移動
-//   s        : 現在のズーム/位置を保存 (次回起動時に自動で復元)
-//   0        : ズーム・位置をリセット
 //   1〜6     : 枠の意匠(デザイン)を切替 ※デバッグ用。意匠決定後に削除する
+// 調整モード中:
+//   ←↑↓→    : 切り抜き位置(表示位置)の移動
+//   + / = / -: デジタルズームの増減
+//   0        : ズーム・位置をリセット / s : 現在のズーム/位置を保存
 // ズーム/位置はサーバ側のカメラ切り抜きを動かすので、映像も検出枠も一緒に動く。
-// モード/フォーカス固定はこのページだけで完結させる (理由: docs/adr/0010-client-side-display-policy.md)
+// 調整を 'c' の中へ隔離したのは、矢印キーを対象の選択に譲るため
+// (理由: docs/adr/0019-key-binding-policy-v2.md)
+// 鑑定法/選択/固定はこのページだけで完結させる (理由: docs/adr/0010-client-side-display-policy.md)
 const stage = document.getElementById("stage");
 const video = document.getElementById("video");
 const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
 const pState = document.getElementById("p-state");
 const pModeName = document.getElementById("p-modename");
-const pOpts = document.getElementById("p-opts");
+const pCalib = document.getElementById("p-calib");
 const pMsg = document.getElementById("p-msg");
 const reticle = document.getElementById("reticle");
+const wheel = document.getElementById("wheel");
 let showVideo = true;
 
 const STEP_ZOOM = 0.1;
 const STEP_OFFSET = 0.01;
 
-// --- モード -----------------------------------------------------------------
-// 単体鑑定: 常に1件だけ枠を出す。Enterでその1件にフォーカスを固定(ロック)する。
+// --- 鑑定法 -----------------------------------------------------------------
+// 単体鑑定: 常に1件だけ枠を出す。矢印で対象を選び替え、Enter で固定する。
 // 広域鑑定: 信頼度の高い順に最大10件を出す(既定。従来の挙動に近い)。
 const MODE_SINGLE = "single";
 const MODE_MULTI = "multi";
-const MODE_LABEL = { single: "単体鑑定", multi: "広域鑑定" };
 const MULTI_MAX = 10;
+// 円盤の並び順・数字キーの割り当て・表示名はこの配列が唯一の出所。鑑定法を
+// 足すときはここに1行足せば、円盤の配置もキーも案内文も追従する。
+const MODES = [
+  { id: MODE_SINGLE, key: "1", num: "壱", name: "単体鑑定" },
+  { id: MODE_MULTI, key: "2", num: "弐", name: "広域鑑定" },
+];
+const MODE_LABEL = {};
+for (const m of MODES) MODE_LABEL[m.id] = m.name;
 let mode = MODE_MULTI;
 
-// 'm' を押してから数字キーを待つ2ストローク入力 (理由: docs/adr/0015-key-binding-policy.md)
-const MODE_PENDING_MS = 3000;  // 待ち状態の自動キャンセル
-let modePending = false;
-let modePendingTimer = null;
+// --- 鑑定盤の円盤 -----------------------------------------------------------
+// 'm' で画面中央に開く。数字なら即確定、矢印はカーソルを動かして Enter で確定。
+// 開いている間はすべてのキーを盤の操作として吸収し、本来の機能は動かさない
+// (理由: docs/adr/0019-key-binding-policy-v2.md)
+const WHEEL_MS = 3000;   // 無操作での自動キャンセル。キー操作のたびに延長する
+const WHEEL_R = 34;      // 環の半径。#wheel の一辺に対する %
+let wheelOpen = false;
+let wheelCursor = 0;     // Enter で確定する項目
+let wheelTimer = null;
+const wheelItems = [];   // 円周上の項目。起動時に1回だけ作る
+
+// --- 調整モード -------------------------------------------------------------
+// 矢印キーを対象の選択に譲ったため、ズーム・切り抜き位置・保存は 'c' で入る
+// 調整モードの中だけで効かせる (理由: docs/adr/0019-key-binding-policy-v2.md)
+let calibMode = false;
 
 // --- [DEBUG] 意匠(デザイン)の切り替え ---------------------------------------
 // 枠の見た目候補を見比べる暫定機能。意匠決定後は本節・default節・themePartを削除
@@ -387,15 +474,18 @@ function setTheme(i) {
 if (DEBUG_THEME_KEYS) stage.dataset.theme = THEMES[themeIndex].id;
 // --- [DEBUG] ここまで -------------------------------------------------------
 
-// --- フォーカス固定 ---------------------------------------------------------
-// トラッキングIDが無いため、毎フレーム IoU で簡易追従する (理由: docs/adr/0012-lock-tracking-by-iou.md)
-const LOCK_GRACE_MS = 2000;   // 見失ってもこの間は最後の枠を残す。過ぎたら自動解除
-const LOCK_IOU_SAME = 0.1;    // 同じラベルなら緩めに一致とみなす
-const LOCK_IOU_ANY = 0.4;     // ラベルが揺れた場合は重なりを厳しく見る
-let lockBox = null;      // ロック中の枠(検出1件のコピー)。null ならロックなし
-let lockLostAt = 0;      // 見失った時刻(ms)。0 なら追従できている
-let lockGraceTimer = null;  // 猶予切れの描き直し予約(再追従できたら取り消す)
-let currentTarget = null;  // 単体鑑定で今表示している1件(Enterの固定対象)
+// --- 対象の選択と固定 -------------------------------------------------------
+// 選択(矢印で選ぶ)も固定(Enter)も、「毎フレーム決め直さずに同じ物体を追い続ける」
+// 点は同じなので仕組みを共有する。トラッキングIDが無いため IoU で簡易追従する
+// (理由: docs/adr/0012-lock-tracking-by-iou.md, docs/adr/0020-arrow-target-navigation.md)
+const SEL_GRACE_MS = 2000;   // 見失ってもこの間は最後の枠を残す。過ぎたら自動解除
+const SEL_IOU_SAME = 0.1;    // 同じラベルなら緩めに一致とみなす
+const SEL_IOU_ANY = 0.4;     // ラベルが揺れた場合は重なりを厳しく見る
+let sel = null;          // 選択/固定中の枠(検出1件のコピー)。null なら照準ベース
+let selLocked = false;   // true なら固定(Enter済み)、false なら選択中
+let selLostAt = 0;       // 見失った時刻(ms)。0 なら追従できている
+let selGraceTimer = null;  // 猶予切れの描き直し予約(再追従できたら取り消す)
+let currentTarget = null;  // 単体鑑定で今表示している1件(矢印の起点・Enterの対象)
 
 // 保存結果などの一時メッセージ。HUDはWS受信ごとに描き直されるため、
 // 期限(ms)を持たせて render() 側で合成する。
@@ -442,36 +532,155 @@ function saveCalib() {
     .catch(() => toast("save failed"));
 }
 
-// --- モード切替とフォーカス固定の操作 ---------------------------------------
-// ロックを解除して追従用の状態を片付ける。
-function clearLock() {
-  lockBox = null;
-  lockLostAt = 0;
-  clearTimeout(lockGraceTimer);
+// --- 鑑定法・円盤・調整モード・選択/固定の操作 ------------------------------
+// 選択(と固定)を捨てて、照準ベースの表示に戻す。
+function clearSel() {
+  sel = null;
+  selLocked = false;
+  selLostAt = 0;
+  clearTimeout(selGraceTimer);
 }
 
 function setMode(next) {
   mode = next;
-  // 鑑定法をまたいでロックを残すと、広域鑑定中に見えない固定状態が残るため解除する。
-  clearLock();
+  // 鑑定法をまたいで選択を残すと、広域鑑定中に見えない固定状態が残るため解除する。
+  clearSel();
   currentTarget = null;
   toast(
     next === MODE_MULTI
       ? `${MODE_LABEL[next]} ── 最大${MULTI_MAX}件`
-      : `${MODE_LABEL[next]} ── Enterで鑑定を固定`
+      : `${MODE_LABEL[next]} ── ←↑↓→で対象を選択  Enterで固定`
   );
 }
 
-function beginModePending() {
-  modePending = true;
-  clearTimeout(modePendingTimer);
-  modePendingTimer = setTimeout(() => { modePending = false; repaint(); }, MODE_PENDING_MS);
-  repaint();  // 鑑定盤に「壱/弐」の選択肢を開く
+// 円盤の項目を作って円周上に並べる。角度は項目数から出すので、MODES に足すだけで
+// 配置が追従する。12時から時計回りに等間隔。
+function buildWheel() {
+  MODES.forEach((m, i) => {
+    const el = document.createElement("div");
+    el.className = "w-item";
+    const num = document.createElement("span");
+    num.className = "w-num";
+    num.textContent = m.num;
+    const key = document.createElement("span");
+    key.className = "w-key";
+    key.textContent = m.key;
+    const name = document.createElement("span");
+    name.textContent = m.name;
+    const now = document.createElement("span");
+    now.className = "w-now";
+    now.textContent = "現在";
+    el.append(num, key, name, now);
+    const a = ((-90 + (360 / MODES.length) * i) * Math.PI) / 180;
+    el.style.left = (50 + Math.cos(a) * WHEEL_R) + "%";
+    el.style.top = (50 + Math.sin(a) * WHEEL_R) + "%";
+    wheel.appendChild(el);
+    wheelItems.push(el);
+  });
+}
+buildWheel();
+
+// 円盤の見た目だけを更新する。WSペイロードに依存しないので、まだ1フレームも
+// 受け取っていない状態で 'm' を押しても開ける (repaint() は payload 待ちのため)。
+function renderWheel() {
+  wheel.classList.toggle("on", wheelOpen);
+  for (let i = 0; i < wheelItems.length; i++) {
+    wheelItems[i].classList.toggle("on", i === wheelCursor);
+    wheelItems[i].classList.toggle("cur", MODES[i].id === mode);
+  }
 }
 
-function endModePending() {
-  modePending = false;
-  clearTimeout(modePendingTimer);
+// 無操作での自動キャンセル。矢印でカーソルを動かしている間は延長する。
+function bumpWheelTimer() {
+  clearTimeout(wheelTimer);
+  wheelTimer = setTimeout(() => {
+    wheelOpen = false;
+    renderWheel();
+    repaint();
+  }, WHEEL_MS);
+}
+
+function openWheel() {
+  wheelOpen = true;
+  // カーソルは今の鑑定法から始める。Enter を空打ちしても何も変わらない。
+  wheelCursor = Math.max(0, MODES.findIndex((m) => m.id === mode));
+  bumpWheelTimer();
+  renderWheel();
+  repaint();  // 照準を消す(盤の中央見出しと重なるため)
+}
+
+function closeWheel() {
+  wheelOpen = false;
+  clearTimeout(wheelTimer);
+  renderWheel();
+}
+
+// 円盤が開いている間のキー。ここで必ず握り潰し、本来の機能は動かさない
+// (理由: docs/adr/0019-key-binding-policy-v2.md)
+function onWheelKey(e) {
+  e.preventDefault();
+  const n = MODES.length;
+  // カーソルは円周を回る。→↓ が次、←↑ が前。
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+    wheelCursor = (wheelCursor + 1) % n;
+    bumpWheelTimer();
+    renderWheel();
+    return;
+  }
+  if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+    wheelCursor = (wheelCursor + n - 1) % n;
+    bumpWheelTimer();
+    renderWheel();
+    return;
+  }
+  if (e.key === "Enter") {
+    closeWheel();
+    setMode(MODES[wheelCursor].id);
+    return;
+  }
+  const i = MODES.findIndex((m) => m.key === e.key);
+  if (i >= 0) {
+    closeWheel();
+    setMode(MODES[i].id);
+    return;
+  }
+  // 'm' や Esc を含め、それ以外のキーは取り消しにだけ使う。
+  closeWheel();
+  toast("鑑定法の選択を取り消しました");
+}
+
+function setCalibMode(on) {
+  calibMode = on;
+  toast(
+    on ? "調整モード ── ←↑↓→:位置  +/-:ズーム  s:保存  c/Esc:終了"
+       : "調整モードを終了",
+    on ? 3000 : 1600
+  );
+}
+
+function toggleVideo() {
+  showVideo = !showVideo;
+  video.style.display = showVideo ? "block" : "none";
+}
+
+// 矢印で対象を選び替える。選び直した対象は「選択中」であって固定ではない。
+// 固定中に矢印を押したときも選択中へ戻す(固定は Enter でやり直す)。
+function navigate(key) {
+  if (mode !== MODE_SINGLE) {
+    toast("対象の選択は単体鑑定(m→1)のみ");
+    return;
+  }
+  if (!lastPayload) return;
+  const next = navTarget(lastPayload.detections, viewRect(), NAV_DIR[key]);
+  if (!next) {
+    toast("その向きに対象がありません");
+    return;
+  }
+  sel = { ...next };
+  selLocked = false;
+  selLostAt = 0;
+  clearTimeout(selGraceTimer);
+  toast(`選択 ── ${next.label_ja || next.label}`);
 }
 
 function toggleLock() {
@@ -479,75 +688,119 @@ function toggleLock() {
     toast("鑑定の固定は単体鑑定(m→1)のみ");
     return;
   }
-  if (lockBox) {
-    clearLock();
+  if (sel && selLocked) {
+    clearSel();
     toast("鑑定の固定を解除");
     return;
   }
-  if (!currentTarget) {
+  // 選択中ならその対象を、選択していなければ照準が指している対象を固定する。
+  const target = sel || currentTarget;
+  if (!target) {
     toast("固定する対象がありません");
     return;
   }
-  // 押した瞬間に枠が出ている対象をそのまま固定する。
-  lockBox = { ...currentTarget };
-  lockLostAt = 0;
-  toast(`鑑定を固定 ── ${currentTarget.label_ja || currentTarget.label}`);
+  sel = { ...target };
+  selLocked = true;
+  selLostAt = 0;
+  clearTimeout(selGraceTimer);
+  toast(`鑑定を固定 ── ${target.label_ja || target.label}`);
+}
+
+// Esc は「今かかっている状態を1つ外す」。円盤 → 調整モード → 選択/固定 の順で、
+// 円盤の分は keydown の先頭で処理済み。
+function onEscape() {
+  if (calibMode) {
+    setCalibMode(false);
+    return;
+  }
+  if (sel) {
+    const wasLocked = selLocked;
+    clearSel();
+    toast(wasLocked ? "鑑定の固定を解除" : "選択を解除 ── 照準に戻ります");
+  }
 }
 
 document.addEventListener("keydown", (e) => {
-  // 修飾キー付きはブラウザ標準ショートカットなので触らない (理由: docs/adr/0015-key-binding-policy.md)
+  // 修飾キー付きはブラウザ標準ショートカットなので触らない
+  // (Shift は '+' の入力に要るので除外しない。理由: docs/adr/0019-key-binding-policy-v2.md)
   if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-  // 'm' の直後は数字キーだけをモード指定として解釈する (理由: docs/adr/0015-key-binding-policy.md)
-  if (modePending) {
-    endModePending();
-    e.preventDefault();
-    if (e.key === "1") setMode(MODE_SINGLE);
-    else if (e.key === "2") setMode(MODE_MULTI);
-    else toast("鑑定法の選択を取り消しました");
+  // 円盤が開いている間は、すべてのキーを盤の操作として扱う。
+  if (wheelOpen) {
+    onWheelKey(e);
+    return;
+  }
+
+  // 調整モード中は調整のキーだけを見る。鑑定の操作(m/Enter/矢印の選択)は動かさない。
+  if (calibMode) {
+    switch (e.key) {
+      // 切り抜き位置を動かす向き。↑ なら「より上」が見えるようになる
+      // (check_camera の w/a/s/d と同じ意味)。
+      case "ArrowUp":
+        e.preventDefault(); calib({ dy: -STEP_OFFSET });
+        break;
+      case "ArrowDown":
+        e.preventDefault(); calib({ dy: STEP_OFFSET });
+        break;
+      case "ArrowLeft":
+        e.preventDefault(); calib({ dx: -STEP_OFFSET });
+        break;
+      case "ArrowRight":
+        e.preventDefault(); calib({ dx: STEP_OFFSET });
+        break;
+      case "+": case "=":
+        calib({ dzoom: STEP_ZOOM });
+        break;
+      case "-":
+        calib({ dzoom: -STEP_ZOOM });
+        break;
+      case "0":
+        calib({ reset: true });
+        break;
+      case "s":
+        saveCalib();
+        break;
+      case "c": case "Escape":
+        setCalibMode(false);
+        break;
+      // 映像のON/OFFは調整と直交する(映像を見ながら合わせる)ので調整中も効かせる。
+      case "d":
+        toggleVideo();
+        break;
+      default:
+        // [DEBUG] 意匠は調整中も見比べたい。意匠決定後はこの節ごと削除する。
+        if (DEBUG_THEME_KEYS) {
+          const i = THEMES.findIndex((t) => t.key === e.key);
+          if (i >= 0) setTheme(i);
+        }
+    }
     return;
   }
 
   switch (e.key) {
     case "m":
-      beginModePending();
+      openWheel();
+      break;
+    case "c":
+      setCalibMode(true);
+      break;
+    case "ArrowUp": case "ArrowDown": case "ArrowLeft": case "ArrowRight":
+      e.preventDefault();
+      navigate(e.key);
       break;
     case "Enter":
       e.preventDefault();
       toggleLock();
       break;
     case "Escape":
-      if (lockBox) { clearLock(); toast("フォーカス固定を解除"); }
+      onEscape();
       break;
     case "d":
-      showVideo = !showVideo;
-      video.style.display = showVideo ? "block" : "none";
+      toggleVideo();
       break;
-    case "+": case "=":
-      calib({ dzoom: STEP_ZOOM });
-      break;
-    case "-":
-      calib({ dzoom: -STEP_ZOOM });
-      break;
-    // 切り抜き位置を動かす向き。↑ なら「より上」が見えるようになる
-    // (check_camera の w/a/s/d と同じ意味)。
-    case "ArrowUp":
-      e.preventDefault(); calib({ dy: -STEP_OFFSET });
-      break;
-    case "ArrowDown":
-      e.preventDefault(); calib({ dy: STEP_OFFSET });
-      break;
-    case "ArrowLeft":
-      e.preventDefault(); calib({ dx: -STEP_OFFSET });
-      break;
-    case "ArrowRight":
-      e.preventDefault(); calib({ dx: STEP_OFFSET });
-      break;
-    case "s":
-      saveCalib();
-      break;
-    case "0":
-      calib({ reset: true });
+    // 調整は 'c' の中だけに置いた。押し間違いを黙って捨てず行き先を案内する。
+    case "+": case "=": case "-": case "0": case "s":
+      toast("ズーム・位置の調整は 'c' で調整モードへ");
       break;
     default:
       // [DEBUG] 意匠の切り替え。意匠決定後はこの節ごと削除する。
@@ -618,45 +871,85 @@ function gazeTarget(dets, r) {
   return best;
 }
 
-// ロック中の枠に対応する検出を探す。ラベル一致を優先し、揺れたら重なりで拾い直す
+// --- 矢印による対象の選び替え -----------------------------------------------
+// 画面座標での向き。↑ が -y。
+const NAV_DIR = {
+  ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+};
+// 進む向きから横にずれた分をどれだけ嫌うか。大きいほど「まっすぐ隣」を選ぶ
+const NAV_CROSS_WEIGHT = 2;
+// 中心がほぼ同じものを「その向きにある」と扱わないための最小値(表示ピクセル)
+const NAV_MIN_PX = 2;
+
+// 今の対象(無ければ照準)から見て、指定の向きにある最も近い検出を返す。
+// 距離は表示ピクセルで測る (理由: docs/adr/0011-gaze-target-selection.md)。
+// 半径 (GAZE_RADIUS) では絞らない。矢印は「意図して選びに行く」操作なので、
+// 照準から遠い対象へも届かせる (理由: docs/adr/0020-arrow-target-navigation.md)
+function navTarget(dets, r, dir) {
+  if (!dir) return null;
+  const ux = dir[0], uy = dir[1];
+  const cur = currentTarget;
+  const cx = (cur ? cur.x + cur.w / 2 : 0.5) * r.w;
+  const cy = (cur ? cur.y + cur.h / 2 : 0.5) * r.h;
+  let best = null, bestScore = Infinity;
+  for (const d of dets) {
+    const px = (d.x + d.w / 2) * r.w, py = (d.y + d.h / 2) * r.h;
+    const main = (px - cx) * ux + (py - cy) * uy;             // 進む向きの成分
+    if (main <= NAV_MIN_PX) continue;   // 真横・後ろ・自分自身は候補にしない
+    const cross = Math.abs((px - cx) * uy - (py - cy) * ux);  // 横にずれた分
+    const score = main + cross * NAV_CROSS_WEIGHT;
+    // 同点なら信頼度の高い方。ちらつきの原因になる同点を残さない。
+    if (score < bestScore || (score === bestScore && best && d.confidence > best.confidence)) {
+      bestScore = score;
+      best = d;
+    }
+  }
+  return best;
+}
+
+// 選択/固定中の枠に対応する検出を探す。ラベル一致を優先し、揺れたら重なりで拾い直す
 // (理由: docs/adr/0012-lock-tracking-by-iou.md)
-function trackLock(dets) {
+function trackSel(dets) {
   let same = null, sameIou = 0, any = null, anyIou = 0;
   for (const d of dets) {
-    const v = iou(d, lockBox);
-    if (d.label === lockBox.label && v > sameIou) { sameIou = v; same = d; }
+    const v = iou(d, sel);
+    if (d.label === sel.label && v > sameIou) { sameIou = v; same = d; }
     if (v > anyIou) { anyIou = v; any = d; }
   }
-  if (same && sameIou >= LOCK_IOU_SAME) return same;
-  if (any && anyIou >= LOCK_IOU_ANY) return any;
+  if (same && sameIou >= SEL_IOU_SAME) return same;
+  if (any && anyIou >= SEL_IOU_ANY) return any;
   return null;
 }
 
-// 実際に描く検出のリストを決める。_state は枠の見た目("locked"/"lost")用。
+// 実際に描く検出のリストを決める。_state は枠の見た目("picked"/"locked"/"lost")用。
 function visibleBoxes(dets, r) {
   if (mode === MODE_MULTI) {
     currentTarget = null;
     return [...dets].sort((a, b) => b.confidence - a.confidence).slice(0, MULTI_MAX);
   }
 
-  if (lockBox) {
-    const hit = trackLock(dets);
+  if (sel) {
+    const hit = trackSel(dets);
     if (hit) {
-      lockBox = { ...hit };   // 追従できたので枠を更新
-      lockLostAt = 0;
-      clearTimeout(lockGraceTimer);  // 戻ってきたので猶予切れの予約は不要
-    } else if (!lockLostAt) {
-      lockLostAt = Date.now();
+      sel = { ...hit };   // 追従できたので枠を更新
+      selLostAt = 0;
+      clearTimeout(selGraceTimer);  // 戻ってきたので猶予切れの予約は不要
+    } else if (!selLostAt) {
+      selLostAt = Date.now();
       // 新フレームが来なくても猶予切れで解除されるよう、期限後の描き直しを予約する。
-      lockGraceTimer = setTimeout(repaint, LOCK_GRACE_MS + 50);
-    } else if (Date.now() - lockLostAt >= LOCK_GRACE_MS) {
-      clearLock();
+      selGraceTimer = setTimeout(repaint, SEL_GRACE_MS + 50);
+    } else if (Date.now() - selLostAt >= SEL_GRACE_MS) {
+      const wasLocked = selLocked;
+      clearSel();
       // render 中なので描き直しはしない
-      setToast("固定を解除 ── 対象を見失いました");
+      setToast(wasLocked
+        ? "固定を解除 ── 対象を見失いました"
+        : "選択を解除 ── 対象を見失いました");
     }
-    if (lockBox) {
-      currentTarget = lockBox;
-      return [{ ...lockBox, _state: lockLostAt ? "lost" : "locked" }];
+    if (sel) {
+      currentTarget = sel;
+      const state = selLostAt ? "lost" : selLocked ? "locked" : "picked";
+      return [{ ...sel, _state: state }];
     }
   }
 
@@ -691,7 +984,11 @@ function render(payload) {
   const r = viewRect();
   const boxes = visibleBoxes(payload.detections, r);
   // 照準は単体鑑定でだけ意味を持つ(広域鑑定は中心で絞り込まない)。
-  reticle.style.display = mode === MODE_SINGLE ? "block" : "none";
+  // 円盤を開いている間は中央の見出しと重なるので消す。
+  reticle.style.display = mode === MODE_SINGLE && !wheelOpen ? "block" : "none";
+  // 対象を選んでいる間、照準はもう対象を決めていないので薄くする
+  // (理由: docs/adr/0020-arrow-target-navigation.md)
+  reticle.classList.toggle("dim", !!sel);
   for (let i = 0; i < boxes.length; i++) {
     const d = boxes[i];
     const box = boxAt(i);
@@ -704,6 +1001,7 @@ function render(payload) {
     // 日本語表示名(label_ja)を優先。無ければ英語ラベル。
     const name = d.label_ja || d.label;
     const mark = d._state === "locked" ? " [固定]"
+      : d._state === "picked" ? " [選択]"
       : d._state === "lost" ? " [見失い]" : "";
     box.children[0].textContent = `${name} ${(d.confidence * 100) | 0}%${mark}`;
   }
@@ -712,13 +1010,18 @@ function render(payload) {
   }
   // --- 鑑定盤 ---
   // 状態は「今どう見ているか」を1語で出す (理由: docs/adr/0010-client-side-display-policy.md)
-  pState.textContent = mode === MODE_MULTI ? "広域走査"
-    : lockBox ? (lockLostAt ? "見失い" : "固定") : "走査中";
+  pState.textContent = calibMode ? "調整中"
+    : mode === MODE_MULTI ? "広域走査"
+    : !sel ? "走査中"
+    : selLostAt ? "見失い"
+    : selLocked ? "固定" : "選択中";
   pModeName.textContent = MODE_LABEL[mode];
-  pOpts.style.display = modePending ? "block" : "none";
+  pCalib.style.display = calibMode ? "block" : "none";
   const msg = Date.now() < toastUntil ? toastText : "";
   pMsg.textContent = msg;
   pMsg.style.display = msg ? "block" : "none";
+  // 鑑定法が変わればカーソルと「現在」の印もずれるので、盤も描き直す。
+  renderWheel();
 
   // --- デバッグ行 ---
   const v = payload.view;
@@ -728,9 +1031,11 @@ function render(payload) {
   // [DEBUG] 意匠決定後はこの1行と themePart の連結を削除する。
   const themePart = DEBUG_THEME_KEYS
     ? ` | 意匠 ${THEMES[themeIndex].name}(1-${THEMES.length}で切替)` : "";
-  const hint = mode === MODE_SINGLE
-    ? ` | m→1/2:鑑定法  Enter:固定/解除  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`
-    : ` | m→1/2:鑑定法  'd':映像ON/OFF  +/-:ズーム  ←↑↓→:位置  s:保存  0:リセット`;
+  const hint = calibMode
+    ? ` | 調整中: ←↑↓→:位置  +/-:ズーム  0:リセット  s:保存  c/Esc:終了`
+    : mode === MODE_SINGLE
+    ? ` | m:鑑定法  ←↑↓→:対象選択  Enter:固定  Esc:解除  c:調整  'd':映像`
+    : ` | m:鑑定法  c:調整  'd':映像`;
   // 表示は絞っても objects は検出総数を出す(絞り込みで見えていない数が分かる)。
   hud.textContent =
     `fps ${payload.fps} | objects ${payload.detections.length}` +
