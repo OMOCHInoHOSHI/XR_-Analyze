@@ -393,7 +393,8 @@
 // キー操作:
 //   m        : モードの円盤を開く (単体鑑定 / 広域鑑定 / 調整)。
 //              数字で即確定 / ←↑↓→ で選び Enter で確定。調整モード中も効く
-//   ←↑↓→    : 単体鑑定で対象を選び替える(その向きにある最も近い検出へ)
+//   ←↑↓→    : 単体鑑定で対象を選び替える(→ は左から右、↓ は上から下の順。
+//              押し続けると次々に移り、端まで行くと反対の端へ回り込む)
 //   Enter    : 選んでいる対象に鑑定を固定 / 固定を解除
 //   Esc      : 選択・固定を解除して照準ベースに戻す
 //   c        : 調整モードの出入り(ズーム・切り抜き位置・保存はこの中だけ)
@@ -716,16 +717,18 @@ function navigate(key) {
     return;
   }
   if (!lastPayload) return;
-  const next = navTarget(lastPayload.detections, viewRect(), NAV_DIR[key]);
-  if (!next) {
+  const hit = navTarget(lastPayload.detections, NAV_DIR[key]);
+  if (!hit) {
     toast("その向きに対象がありません");
     return;
   }
+  const next = hit.det;
   sel = { ...next };
   selLocked = false;
   selLostAt = 0;
   clearTimeout(selGraceTimer);
-  toast(`選択 ── ${next.label_ja || next.label}`);
+  // 一周したことを出さないと、端で「なぜ逆へ飛んだのか」が分からない。
+  toast(`選択 ── ${next.label_ja || next.label}${hit.wrapped ? " (一周)" : ""}`);
 }
 
 function toggleLock() {
@@ -921,45 +924,60 @@ function gazeTarget(dets, r) {
 }
 
 // --- 矢印による対象の選び替え -----------------------------------------------
-// 画面座標での向き。↑ が -y。
+// 軸に沿って並べた輪を回す。→ は x が大きい方へ、↓ は y が大きい方へ「次」を探し、
+// その向きに尽きたら反対の端へ回り込む。押し続けるだけで視界の検出を順に巡れる
+// (理由: docs/adr/0022-arrow-navigation-wraps.md)
 const NAV_DIR = {
-  ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+  ArrowRight: { axis: "x", step: 1 },
+  ArrowLeft: { axis: "x", step: -1 },
+  ArrowDown: { axis: "y", step: 1 },
+  ArrowUp: { axis: "y", step: -1 },
 };
-// 進む向きから横にずれた分をどれだけ嫌うか。大きいほど「まっすぐ隣」を選ぶ
-const NAV_CROSS_WEIGHT = 2;
-// 中心がほぼ同じものを「その向きにある」と扱わないための最小値(表示ピクセル)
-const NAV_MIN_PX = 2;
-// 横ずれを許す上限。前進量の何倍まで「その向きにある」と認めるか(2 = 約63°)。
-// 減点だけで足切りしないと、真横に大きく離れた検出が「わずかに前」という理由で
-// 勝ってしまう。前進 5px・横 278px の検出が、前進 400px の真上の検出に勝つ事象を
-// テストで確認した (理由: docs/adr/0020-arrow-target-navigation.md)
-const NAV_CONE = 2;
 
-// 今の対象(無ければ照準)から見て、指定の向きにある最も近い検出を返す。
-// 距離は表示ピクセルで測る (理由: docs/adr/0011-gaze-target-selection.md)。
-// 半径 (GAZE_RADIUS) では絞らない。矢印は「意図して選びに行く」操作なので、
-// 照準から遠い対象へも届かせる (理由: docs/adr/0020-arrow-target-navigation.md)
-function navTarget(dets, r, dir) {
+// 軸に沿った位置。→/← は x、↑/↓ は y だけを見る。順序を見るだけなので正規化座標の
+// ままでよい (表示ピクセルへの変換は軸ごとの単調な拡大で、大小関係を変えない。
+//  距離を測るときは表示ピクセルが要る: docs/adr/0011-gaze-target-selection.md)
+function navPos(d, axis) {
+  return axis === "x" ? d.x + d.w / 2 : d.y + d.h / 2;
+}
+
+// 軸の位置が厳密に並んだときの控えの順序。もう一方の軸 → ラベル の順に見て一意に
+// 決める。サーバは座標を小数5桁に丸めて配信するため (backend/detector.py,
+// backend/stabilizer.py)、厳密な一致は起こりうるがまれ。起きたときは2件が同じ軸位置を
+// 共有するので、片方はその軸の巡回に入らない。もう一方の軸で拾う。
+function navTieLess(a, b, axis) {
+  const pa = axis === "x" ? a.y + a.h / 2 : a.x + a.w / 2;
+  const pb = axis === "x" ? b.y + b.h / 2 : b.x + b.w / 2;
+  return pa !== pb ? pa < pb : a.label < b.label;
+}
+
+// 今の対象(無ければ照準)を起点に、軸に沿った次の検出を返す。
+// 戻り値は { det, wrapped } か null。wrapped は端から反対の端へ回り込んだことを表す。
+//
+// 軸の位置が起点と厳密に等しい検出は「次」に選ばない。真上に重なった物へ → で
+// 移ると、押した向きと動く向きが食い違うため。そちらは ↑↓ で拾う。
+function navTarget(dets, dir) {
   if (!dir) return null;
-  const ux = dir[0], uy = dir[1];
-  const cur = currentTarget;
-  const cx = (cur ? cur.x + cur.w / 2 : 0.5) * r.w;
-  const cy = (cur ? cur.y + cur.h / 2 : 0.5) * r.h;
-  let best = null, bestScore = Infinity;
+  const axis = dir.axis, fwd = dir.step;
+  const here = (currentTarget ? navPos(currentTarget, axis) : 0.5) * fwd;
+  let next = null, nextPos = 0;   // 進む向きで最も手前 = 次の対象
+  let far = null, farPos = 0;     // 反対向きで最も遠い = 一周したときの行き先
   for (const d of dets) {
-    const px = (d.x + d.w / 2) * r.w, py = (d.y + d.h / 2) * r.h;
-    const main = (px - cx) * ux + (py - cy) * uy;             // 進む向きの成分
-    if (main <= NAV_MIN_PX) continue;   // 真横・後ろ・自分自身は候補にしない
-    const cross = Math.abs((px - cx) * uy - (py - cy) * ux);  // 横にずれた分
-    if (cross > main * NAV_CONE) continue;   // 向きから外れすぎたものは候補にしない
-    const score = main + cross * NAV_CROSS_WEIGHT;
-    // 同点なら信頼度の高い方。ちらつきの原因になる同点を残さない。
-    if (score < bestScore || (score === bestScore && best && d.confidence > best.confidence)) {
-      bestScore = score;
-      best = d;
+    const p = navPos(d, axis) * fwd;
+    if (p > here) {
+      if (!next || p < nextPos || (p === nextPos && navTieLess(d, next, axis))) {
+        next = d;
+        nextPos = p;
+      }
+    } else if (p < here) {
+      if (!far || p < farPos || (p === farPos && navTieLess(d, far, axis))) {
+        far = d;
+        farPos = p;
+      }
     }
   }
-  return best;
+  if (next) return { det: next, wrapped: false };
+  return far ? { det: far, wrapped: true } : null;
 }
 
 // 選択/固定中の枠に対応する検出を探す。ラベル一致を優先し、揺れたら重なりで拾い直す

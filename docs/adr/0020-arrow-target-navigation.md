@@ -1,8 +1,8 @@
 # ADR-0020: 単体鑑定の対象は矢印の空間方向で選び替え、選択と固定を分ける
 
-- ステータス: 承認済み
+- ステータス: 置換 (ADR-0022 による)
 - 記録日: 2026-08-29
-- 関連: [ADR-0010](0010-client-side-display-policy.md), [ADR-0011](0011-gaze-target-selection.md), [ADR-0012](0012-lock-tracking-by-iou.md), [ADR-0013](0013-overlay-coordinate-basis.md), [ADR-0014](0014-box-theme-and-dom-reuse.md), [ADR-0019](0019-key-binding-policy-v2.md)
+- 関連: [ADR-0010](0010-client-side-display-policy.md), [ADR-0011](0011-gaze-target-selection.md), [ADR-0012](0012-lock-tracking-by-iou.md), [ADR-0013](0013-overlay-coordinate-basis.md), [ADR-0014](0014-box-theme-and-dom-reuse.md), [ADR-0019](0019-key-binding-policy-v2.md), [ADR-0022](0022-arrow-navigation-wraps.md)
 
 ## 文脈
 
