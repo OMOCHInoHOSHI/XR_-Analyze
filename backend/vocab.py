@@ -112,7 +112,6 @@ def resolve(names: dict[int, str], policy: str) -> list[int] | None:
         print(f"[vocab] {source} に一致するクラスがありません。絞り込みを行いません。")
         return None
 
-    print(f"[vocab] {source} に一致する {len(keep)}/{len(names)} クラスに絞り込みます")
     return keep
 
 

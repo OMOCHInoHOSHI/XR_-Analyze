@@ -141,8 +141,6 @@ class Detector:
             if fast
             else None
         )
-        route = "高速(マスク省略)" if self._fast else "ultralytics predict()"
-        print(f"[detector] 推論経路: {route}")
         if keep and self._fast is None:
             # 絞り込みはヘッドを切り詰めて実現しているので predict() 経路では効かない
             print("[vocab] predict() 経路では語彙の絞り込みは適用されません")
