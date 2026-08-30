@@ -877,9 +877,9 @@ function selectMode(id) {
 }
 
 // 円盤の項目を作って円周上に並べる。角度は項目数から出すので、MODES に足すだけで
-// 配置が追従する。12時から反時計回りに等間隔(壱=12時 / 弐=8時 / 参=4時)。
-// 盤自体は逆に時計回りへ回すことで、→ を押した項目が12時へ滑ってくる
-// (理由: docs/adr/0030-wheel-turns-with-the-key.md)。
+// 配置が追従する。12時から時計回りに等間隔(壱=12時 / 弐=4時 / 参=8時)。
+// 盤は → で左回りに回り、次の項目が12時へ滑ってくる。並びを優先して
+// この向きに戻した (理由: docs/adr/0031-wheel-layout-restored.md)。
 function buildWheel() {
   wheelRotor = document.createElement("div");
   wheelRotor.className = "w-rotor";
@@ -898,7 +898,7 @@ function buildWheel() {
     now.className = "w-now";
     now.textContent = "現在";
     el.append(num, key, name, now);
-    const a = ((-90 - (360 / MODES.length) * i) * Math.PI) / 180;
+    const a = ((-90 + (360 / MODES.length) * i) * Math.PI) / 180;
     el.style.left = (50 + Math.cos(a) * WHEEL_R) + "%";
     el.style.top = (50 + Math.sin(a) * WHEEL_R) + "%";
     wheelRotor.appendChild(el);
@@ -910,13 +910,13 @@ buildWheel();
 
 // 項目1つ分の角度と、その項目を 12時へ持ってくるための盤の角度。
 const wheelStep = () => 360 / MODES.length;
-const wheelAngleFor = (i) => i * wheelStep();
+const wheelAngleFor = (i) => -i * wheelStep();
 
 // 隣へ1つ回す。delta は +1 が次、-1 が前。
 function turnBy(delta) {
   const n = MODES.length;
   wheelCursor = (wheelCursor + delta + n) % n;
-  wheelTurn += delta * wheelStep();
+  wheelTurn -= delta * wheelStep();
 }
 
 // 円盤の見た目だけを更新する。WSペイロードに依存しないので、まだ1フレームも
@@ -965,7 +965,6 @@ function closeWheel() {
 function onWheelKey(e) {
   e.preventDefault();
   // 盤そのものを回す。→↓ で次が、←↑ で前が、12時の指標へ滑ってくる。
-  // 盤は → で右回り(時計回り)に回る (理由: docs/adr/0030-wheel-turns-with-the-key.md)。
   if (e.key === "ArrowRight" || e.key === "ArrowDown") {
     turnBy(1);
     bumpWheelTimer();

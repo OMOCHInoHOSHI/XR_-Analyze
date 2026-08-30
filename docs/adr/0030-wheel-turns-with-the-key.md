@@ -1,6 +1,6 @@
 # ADR-0030: 円盤は矢印の向きと同じ向きに回す
 
-- ステータス: 承認済み
+- ステータス: 置換 ([ADR-0031](0031-wheel-layout-restored.md) による)
 - 記録日: 2026-08-30
 - 関連: [ADR-0021](0021-mode-wheel-with-calibration.md), [ADR-0023](0023-rotating-mode-wheel.md)
 

@@ -228,3 +228,10 @@ TTS_RATE: int = _int("TTS_RATE", 130)
 # 合成完了を待つ上限秒(say / voicevox 共通)。実測は鑑定文1件あたり
 # voicevox が 1.3〜2.9秒(文の長さによる)、say が約0.5秒(初回のみ声の読み込みで約2秒)。
 TTS_TIMEOUT_SEC: float = _float("TTS_TIMEOUT_SEC", 20.0)
+
+# --- 終了 ---
+# Ctrl+C を押してから強制的に閉じるまでの秒数。uvicorn は既定で処理中のリクエストを
+# 最後まで待つが、鑑定文の生成(最大30秒)や音声合成(最大20秒)の最中だとその間ずっと
+# 終われない。止めると決めた後の生成結果に用は無いので打ち切る
+# (理由: docs/adr/0032-prompt-shutdown.md)。
+SHUTDOWN_GRACE_SEC: float = _float("SHUTDOWN_GRACE_SEC", 2.0)

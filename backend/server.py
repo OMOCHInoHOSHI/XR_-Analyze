@@ -545,7 +545,15 @@ def main() -> None:
     import uvicorn
 
     print(f"[XR Analyze] http://{config.HOST}:{config.PORT}  (model={config.MODEL})")
-    uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="info")
+    # timeout_graceful_shutdown を渡さないと、Ctrl+C のあと処理中の /explain や
+    # /speak が終わるまで待ち続ける (理由: docs/adr/0032-prompt-shutdown.md)
+    uvicorn.run(
+        app,
+        host=config.HOST,
+        port=config.PORT,
+        log_level="info",
+        timeout_graceful_shutdown=config.SHUTDOWN_GRACE_SEC,
+    )
 
 
 if __name__ == "__main__":
