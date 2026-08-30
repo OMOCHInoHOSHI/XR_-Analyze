@@ -200,15 +200,31 @@ OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
 EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 30.0)
 
 # --- 読み上げ (TTS) ---
-# 鑑定文を音声で読み上げる。選択肢は "say"(macOS同梱コマンド) / "off"(無効)。
-# macOS以外には say が無いため、既定は Darwin のときだけ "say"、それ以外は "off"。
-_default_tts = "say" if platform.system() == "Darwin" else "off"
+# 鑑定文を音声で読み上げる。選択肢は
+# "voicevox"(VOICEVOX ENGINE、キャラクター性のある声) /
+# "say"(macOS同梱コマンド。macOS専用) / "off"(無効)。
+# VOICEVOX は macOS 以外でも動くため、既定を platform 判定なしに "voicevox" にする
+# (経緯: docs/adr/0026-voicevox-character-voice.md)。
+_default_tts = "voicevox"
 TTS_BACKEND: str = os.environ.get("TTS_BACKEND", _default_tts).strip().lower()
+
+# VOICEVOX ENGINE の接続先。事前に ENGINE(またはアプリ)を起動しておく必要がある。
+VOICEVOX_URL: str = os.environ.get("VOICEVOX_URL", "http://localhost:50021")
+# 話者ID。既定の 82 は「青山龍星」のスタイル「不機嫌」。ぶっきらぼうで低い声が
+# 無口な職人鑑定士という人物像に合う (経緯: docs/adr/0026-voicevox-character-voice.md)。
+# 他の声は ENGINE 起動中に `GET /speakers` で一覧できる。
+VOICEVOX_SPEAKER: int = _int("VOICEVOX_SPEAKER", 82)
+VOICEVOX_SPEED: float = _float("VOICEVOX_SPEED", 0.9)        # speedScale。1.0が標準、小さいほど遅い
+VOICEVOX_PITCH: float = _float("VOICEVOX_PITCH", 0.0)        # pitchScale。0.0が標準
+VOICEVOX_INTONATION: float = _float("VOICEVOX_INTONATION", 1.0)  # intonationScale。1.0が標準
+
+# 以下2つは TTS_BACKEND="say"(macOS専用)のときだけ使う設定。
 # 声の種類。ターミナルで `say -v '?'` を実行すると導入済みの声を一覧できる。
 # Grandpa(老翁の声)を既定にしているのは、無口な職人鑑定士という人物像に寄せた
 # 選択のため (経緯: docs/adr/0025-inspector-voice-readout.md)。
 TTS_VOICE: str = os.environ.get("TTS_VOICE", "Grandpa")
 # 話速(words/min相当)。say の既定は175だが、重々しく読ませるため落としてある。
 TTS_RATE: int = _int("TTS_RATE", 130)
-# 合成完了を待つ上限秒。実測は鑑定文1件あたり約0.5秒(初回のみ声の読み込みで約2秒)。
+# 合成完了を待つ上限秒(say / voicevox 共通)。実測は鑑定文1件あたり
+# voicevox が 1.3〜2.9秒(文の長さによる)、say が約0.5秒(初回のみ声の読み込みで約2秒)。
 TTS_TIMEOUT_SEC: float = _float("TTS_TIMEOUT_SEC", 20.0)

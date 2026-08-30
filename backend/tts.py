@@ -1,18 +1,23 @@
 """
 鑑定文の読み上げ(音声合成)。
 
-現状は macOS 同梱の `say` コマンドで WAV を合成するだけだが、後から
-VOICEVOX 等のローカル音声合成エンジンに差し替えられるよう、合成処理を
-本モジュールに閉じ、呼び出し側は `synthesize()` だけを見ればよい形にする。
-バックエンドの選択は `config.TTS_BACKEND` で行う。
+macOS 同梱の `say` コマンドに加え、キャラクター性のある声を出せる
+VOICEVOX ENGINE にも対応する。合成処理は本モジュールに閉じ、呼び出し側は
+`synthesize()` だけを見ればよい形にする。バックエンドの選択は
+`config.TTS_BACKEND` で行う。
 
-方式の選定経緯 (VOICEVOX 等を採らなかった理由を含む):
+方式の選定経緯 (VOICEVOX 導入の経緯を含む):
 docs/adr/0025-inspector-voice-readout.md
+docs/adr/0026-voicevox-character-voice.md
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from . import config
@@ -31,6 +36,8 @@ def synthesize(text: str) -> bytes:
         raise TTSUnavailable("読み上げは無効化されています (TTS_BACKEND=off)")
     if backend == "say":
         return _say(text)
+    if backend == "voicevox":
+        return _voicevox(text)
     raise TTSUnavailable(f"未知の TTS_BACKEND: {backend}")
 
 
@@ -72,6 +79,57 @@ def _say(text: str) -> bytes:
 
         # 一時ディレクトリが消える(with を抜ける)前に読み切る必要がある。
         data = out.read_bytes()
+
+    if not data:
+        raise TTSUnavailable("読み上げの合成結果が空でした")
+    return data
+
+
+def _voicevox(text: str) -> bytes:
+    """
+    VOICEVOX ENGINE で WAV を合成する。
+
+    依存を増やさないため HTTP クライアントは stdlib の urllib で済ませる
+    (`server.py` の `_ollama_explain` と同じ方針)。呼び出しは2段階:
+      1. /audio_query で本文から AudioQuery(発話パラメータのJSON)を作る
+      2. 1のパラメータを config の値で上書きし、/synthesis に投げて WAV を得る
+    """
+    base = config.VOICEVOX_URL.rstrip("/")
+    speaker = config.VOICEVOX_SPEAKER
+
+    # 1. AudioQuery を作る。本文はクエリ文字列で渡し、ボディは空でよい。
+    query_url = (
+        f"{base}/audio_query?text={urllib.parse.quote(text)}&speaker={speaker}"
+    )
+    query_req = urllib.request.Request(query_url, data=b"", method="POST")
+    try:
+        with urllib.request.urlopen(query_req, timeout=config.TTS_TIMEOUT_SEC) as resp:
+            audio_query = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける
+        raise TTSUnavailable(
+            "音声合成エンジン (VOICEVOX) に接続できません。起動を確認してください"
+        ) from e
+
+    # 2. 話速・音高・抑揚を config の値で上書きしてから合成する。
+    audio_query["speedScale"] = config.VOICEVOX_SPEED
+    audio_query["pitchScale"] = config.VOICEVOX_PITCH
+    audio_query["intonationScale"] = config.VOICEVOX_INTONATION
+
+    synth_url = f"{base}/synthesis?speaker={speaker}"
+    synth_req = urllib.request.Request(
+        synth_url,
+        data=json.dumps(audio_query).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(synth_req, timeout=config.TTS_TIMEOUT_SEC) as resp:
+            data = resp.read()
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise TTSUnavailable(
+            "音声合成エンジン (VOICEVOX) に接続できません。起動を確認してください"
+        ) from e
 
     if not data:
         raise TTSUnavailable("読み上げの合成結果が空でした")

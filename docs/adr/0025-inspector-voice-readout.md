@@ -1,6 +1,6 @@
 # ADR-0025: 鑑定文の読み上げは macOS 同梱の `say` で合成し、方式は差し替え可能にする
 
-- ステータス: 承認済み
+- ステータス: 承認済み (既定バックエンドのみ [ADR-0026](0026-voicevox-character-voice.md) が更新)
 - 記録日: 2026-08-30
 - 関連: [ADR-0002](0002-detection-streaming-contract.md), [ADR-0010](0010-client-side-display-policy.md), [ADR-0024](0024-llm-object-explanation.md)
 

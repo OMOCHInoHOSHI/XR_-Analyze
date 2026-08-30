@@ -233,11 +233,30 @@ ollama serve                 # 起動 (http://localhost:11434)
 できます(下記「設定 (環境変数で上書き)」参照)。鑑定文は検出ラベルのみから生成する
 ため、画角に見えている個体の特徴(色・状態など)は含まれません。
 
-鑑定文は表示と同時に音声でも読み上げられます(macOS 同梱の `say` コマンドで
-サーバ側が音声を合成)。声の選定経緯は [ADR-0025](docs/adr/0025-inspector-voice-readout.md)
-を参照してください。`TTS_BACKEND` / `TTS_VOICE` / `TTS_RATE` の環境変数で上書き
-できます(下記「設定 (環境変数で上書き)」参照)。ターミナルで `say -v '?'` を実行
-すると、導入済みの声を一覧できます。
+鑑定文は表示と同時に音声でも読み上げられます。既定はキャラクター性のある声を
+出せる **VOICEVOX ENGINE** です(声の選定経緯は
+[ADR-0025](docs/adr/0025-inspector-voice-readout.md) /
+[ADR-0026](docs/adr/0026-voicevox-character-voice.md) を参照)。
+
+セットアップ (事前に一度だけ):
+
+- [公式サイト](https://voicevox.hiroshiba.jp/) からアプリ版 VOICEVOX を入れて
+  起動するか、ENGINE 単体([voicevox_engine](https://github.com/VOICEVOX/voicevox_engine))
+  を起動してください。既定の接続先は `http://localhost:50021` です。
+- **クレジット表記が必須です。** 既定の話者「青山龍星」の利用規約は、個人が
+  生成した音声について「`VOICEVOX:青山龍星` とクレジットを記載すれば、商用・
+  非商用で利用可能」と定めています(企業が携わる形で利用する場合は権利元への
+  事前確認が必要)。本アプリを公開・配布する際は必ず記載してください。
+  規約は話者ごとに異なります。`VOICEVOX_SPEAKER` を変えたときは、ENGINE 起動中に
+  `GET /speaker_info?speaker_uuid=...` を叩くか公式サイトで、その話者の規約を
+  確認してください。
+
+`TTS_BACKEND` / `VOICEVOX_URL` / `VOICEVOX_SPEAKER` / `VOICEVOX_SPEED` /
+`VOICEVOX_PITCH` / `VOICEVOX_INTONATION` の環境変数で上書きできます(下記
+「設定 (環境変数で上書き)」参照)。`TTS_BACKEND=say` にすれば、従来どおり
+macOS 同梱の `say` コマンドで読み上げることもできます(`TTS_VOICE` /
+`TTS_RATE` で調整。ターミナルで `say -v '?'` を実行すると導入済みの声を
+一覧できます)。
 
 ## 枠の意匠 (デザイン候補の切り替え) ※暫定
 
@@ -332,10 +351,15 @@ python3 -m backend.build_ja_dict
 | `OLLAMA_URL` | http://localhost:11434 | AI説明(上記「固定した物体の AI 説明」)で呼ぶ Ollama のアドレス |
 | `OLLAMA_MODEL` | gemma4:e4b | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名 |
 | `EXPLAIN_TIMEOUT_SEC` | 30.0 | AI説明の生成完了を待つ上限秒。初回生成は実測約7.5秒 |
-| `TTS_BACKEND` | say(macOS) / off(それ以外) | 鑑定文の読み上げ方式。`say`(macOS同梱コマンド) / `off`(無効) |
-| `TTS_VOICE` | Grandpa | 読み上げの声。`say -v '?'` で導入済みの声を一覧できる |
-| `TTS_RATE` | 130 | 読み上げの話速(words/min相当)。say の既定175より遅く、重々しく読ませる |
-| `TTS_TIMEOUT_SEC` | 20.0 | 読み上げの合成完了を待つ上限秒。実測は1件あたり約0.5秒(初回のみ約2秒) |
+| `TTS_BACKEND` | voicevox | 鑑定文の読み上げ方式。`voicevox`(VOICEVOX ENGINE) / `say`(macOS同梱コマンド) / `off`(無効) |
+| `VOICEVOX_URL` | http://localhost:50021 | VOICEVOX ENGINE の接続先 |
+| `VOICEVOX_SPEAKER` | 82 | VOICEVOX の話者ID。既定は「青山龍星」のスタイル「不機嫌」。`GET /speakers` で一覧できる |
+| `VOICEVOX_SPEED` | 0.9 | VOICEVOX の話速(speedScale)。1.0が標準、小さいほど遅い |
+| `VOICEVOX_PITCH` | 0.0 | VOICEVOX の音高(pitchScale)。0.0が標準 |
+| `VOICEVOX_INTONATION` | 1.0 | VOICEVOX の抑揚(intonationScale)。1.0が標準 |
+| `TTS_VOICE` | Grandpa | (say専用)読み上げの声。`say -v '?'` で導入済みの声を一覧できる |
+| `TTS_RATE` | 130 | (say専用)読み上げの話速(words/min相当)。say の既定175より遅く、重々しく読ませる |
+| `TTS_TIMEOUT_SEC` | 20.0 | 読み上げの合成完了を待つ上限秒(say/voicevox共通)。実測は1件あたり voicevox 1.3〜2.9秒 / say 約0.5秒 |
 
 > Apple Silicon(M1〜)では `DEVICE` を指定しなくても自動で `mps`(GPU)が有効に
 > なります。明示的にCPUを使いたい場合のみ `DEVICE=cpu` を指定してください。

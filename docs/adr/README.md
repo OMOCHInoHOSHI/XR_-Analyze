@@ -41,6 +41,7 @@
 | [0023](0023-rotating-mode-wheel.md) | モードの円盤はカーソルではなく盤そのものを回す | `frontend/index.html` |
 | [0024](0024-llm-object-explanation.md) | 固定した物体の説明はローカルLLM (Ollama) で生成する | `server.py` / `config.py` / `frontend/index.html` |
 | [0025](0025-inspector-voice-readout.md) | 鑑定文の読み上げは macOS 同梱の `say` で合成し、方式は差し替え可能にする | `tts.py` / `server.py` / `frontend/index.html` |
+| [0026](0026-voicevox-character-voice.md) | 読み上げの既定を VOICEVOX のキャラクター音声にする | `tts.py` / `config.py` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は
