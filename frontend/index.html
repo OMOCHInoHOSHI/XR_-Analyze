@@ -18,6 +18,9 @@
     --c: #00ff66;          /* 通常の枠色 */
     --c-lock: #ffcc00;     /* フォーカス固定中 */
     --c-lost: #ffcc00;     /* 見失い中(猶予内) */
+    /* 円盤と鑑定ウィンドウの拡大率。グラスごとの見え方の個体差を、調整モードの
+       f/v でここを書き換えて吸収する (既定 1.0、0.7〜1.5)。 */
+    --ui-scale: 1;
     --face: "Hiragino Sans", "Hiragino Kaku Gothic ProN",
       "Yu Gothic", Meiryo, sans-serif; }
 
@@ -80,7 +83,8 @@
      JS が MODES から計算するので、鑑定法を足してもここは触らなくてよい。
      色(--c)と書体(--face)は意匠から受け取るので、盤も意匠に合わせて変わる。 */
   #wheel { position: absolute; left: 50%; top: 50%;
-    width: 44vmin; height: 44vmin; margin: -22vmin 0 0 -22vmin;
+    width: calc(60vmin * var(--ui-scale)); height: calc(60vmin * var(--ui-scale));
+    margin: calc(-30vmin * var(--ui-scale)) 0 0 calc(-30vmin * var(--ui-scale));
     display: none; pointer-events: none;
     font-family: var(--face); color: var(--c); letter-spacing: .12em; }
   #wheel.on { display: block; animation: wheel-in .16s ease-out; }
@@ -108,13 +112,14 @@
   /* 中央の見出し。照準と重なるため、盤を開いている間は照準を消す。 */
   .w-hub { position: absolute; left: 50%; top: 50%; width: 100%;
     transform: translate(-50%, -50%); text-align: center;
-    font-size: 12px; opacity: .7; }
-  .w-hub b { display: block; font-size: 16px; font-weight: 700;
-    letter-spacing: .3em; margin-bottom: 3px; }
+    font-size: calc(17px * var(--ui-scale)); opacity: .7; }
+  .w-hub b { display: block; font-size: calc(22px * var(--ui-scale));
+    font-weight: 700; letter-spacing: .3em; margin-bottom: 3px; }
   /* 円周上の項目。left/top は JS が入れる。盤が回ると項目も一緒に回ってしまうので、
      JS が同じ角度だけ逆に回して文字を水平に保つ。 */
   .w-item { position: absolute; transform: translate(-50%, -50%);
-    white-space: nowrap; font-size: 17px; padding: 5px 14px;
+    white-space: nowrap; font-size: calc(24px * var(--ui-scale));
+    padding: 5px 14px;
     border: 1px solid transparent; background: rgba(0, 14, 22, .55);
     opacity: .5;
     transition: transform .3s cubic-bezier(.22, .61, .36, 1), opacity .3s ease; }
@@ -125,14 +130,14 @@
     #wheel.on { animation: none; }
   }
   .w-num { margin-right: .1em; }
-  .w-key { font-size: 11px; opacity: .7; margin: 0 .6em 0 .3em; }
+  .w-key { font-size: calc(15px * var(--ui-scale)); opacity: .7; margin: 0 .6em 0 .3em; }
   .w-key::before { content: "["; }
   .w-key::after { content: "]"; }
   /* カーソル位置 = Enter を押したときに確定する項目。 */
   .w-item.on { opacity: 1; border-color: var(--c);
     box-shadow: 0 0 14px rgba(255, 255, 255, .16); }
   /* 今選んでいる鑑定法。カーソルとは別物なので印で区別する。 */
-  .w-now { display: none; font-size: 11px; opacity: .85; margin-left: .7em; }
+  .w-now { display: none; font-size: calc(15px * var(--ui-scale)); opacity: .85; margin-left: .7em; }
   .w-now::before { content: "◇ "; }
   .w-item.cur .w-now { display: inline; }
   @keyframes wheel-in {
@@ -145,7 +150,7 @@
      開閉の演出は opacity だけ (#wheel の wheel-in は scale を含むため
      transform: translate(-50%,-50%) と併用できない)。 */
   #explain { position: absolute; left: 50%; top: 50%;
-    width: 56vmin; max-width: 640px;
+    width: calc(66vmin * var(--ui-scale)); max-width: calc(800px * var(--ui-scale));
     transform: translate(-50%, -50%); display: none; pointer-events: none;
     background: rgba(0, 14, 22, .78); color: var(--c);
     border: 1px solid var(--c); padding: 7px 16px 9px;
@@ -158,10 +163,10 @@
   .e-head { display: flex; gap: 20px; justify-content: space-between;
     border-bottom: 1px solid rgba(255, 255, 255, .18);
     margin-bottom: 5px; padding-bottom: 2px; }
-  .e-name { font-weight: 700; font-size: 17px; letter-spacing: .12em; }
-  .e-key { opacity: .6; font-size: 11px; align-self: center; white-space: nowrap; }
+  .e-name { font-weight: 700; font-size: calc(24px * var(--ui-scale)); letter-spacing: .12em; }
+  .e-key { opacity: .6; font-size: calc(15px * var(--ui-scale)); align-self: center; white-space: nowrap; }
   /* 本文。説明文は文章なので字間は締め、行間は広めに取る。 */
-  #e-body { font-size: 15px; line-height: 1.75; letter-spacing: .05em; }
+  #e-body { font-size: calc(21px * var(--ui-scale)); line-height: 1.75; letter-spacing: .05em; }
 
   /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
   .box { position: absolute; box-sizing: border-box;
@@ -429,6 +434,7 @@
       <div class="p-calib" id="p-calib">
         <div><span class="p-ck">←↑↓→</span>切り抜き位置</div>
         <div><span class="p-ck">+ / -</span>ズーム</div>
+        <div><span class="p-ck">f / v</span>文字サイズ</div>
         <div><span class="p-ck">0</span>リセット</div>
         <div><span class="p-ck">s</span>保存</div>
         <div><span class="p-ck">m</span>モードへ</div>
@@ -454,7 +460,8 @@
 // 調整モード中:
 //   ←↑↓→    : 切り抜き位置(表示位置)の移動
 //   + / = / -: デジタルズームの増減
-//   0        : ズーム・位置をリセット / s : 現在のズーム/位置を保存
+//   f / v    : 円盤と鑑定ウィンドウの文字サイズ (f=大きく v=小さく、保存される)
+//   0        : ズーム・位置・文字サイズをリセット / s : 現在のズーム/位置を保存
 //   m        : モードの円盤を開く。鑑定法を選べばそのまま調整を抜けられる
 // ズーム/位置はサーバ側のカメラ切り抜きを動かすので、映像も検出枠も一緒に動く。
 // 調整を 'c' の中へ隔離したのは、矢印キーを対象の選択に譲るため
@@ -477,6 +484,32 @@ let showVideo = true;
 
 const STEP_ZOOM = 0.1;
 const STEP_OFFSET = 0.01;
+
+// --- UIの拡大率 (円盤と鑑定ウィンドウ) ---------------------------------------
+// ズーム/位置がサーバ側のカメラ値なのに対し、文字の大きさは見ている画面(グラス)
+// 固有の値なので localStorage に置く。サーバへは保存しない。
+const UI_SCALE_KEY = "ui-scale";
+const UI_SCALE_MIN = 0.7;
+const UI_SCALE_MAX = 1.5;
+const STEP_UI_SCALE = 0.05;
+
+function loadUiScale() {
+  const v = parseFloat(localStorage.getItem(UI_SCALE_KEY));
+  if (Number.isNaN(v)) return 1.0;
+  return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, v));
+}
+
+function applyUiScale(v) {
+  // 0.05 刻みで丸めないと 1.1000000000000001 のような値が localStorage に残る
+  const s = Math.round(Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, v)) * 100) / 100;
+  uiScale = s;
+  stage.style.setProperty("--ui-scale", s);
+  localStorage.setItem(UI_SCALE_KEY, String(s));
+  return s;
+}
+
+let uiScale = loadUiScale();
+applyUiScale(uiScale);
 
 // --- 鑑定法 -----------------------------------------------------------------
 // 単体鑑定: 常に1件だけ枠を出す。矢印で対象を選び替え、Enter で固定する。
@@ -838,7 +871,7 @@ function onWheelKey(e) {
 function setCalibMode(on) {
   calibMode = on;
   toast(
-    on ? "調整モード ── ←↑↓→:位置  +/-:ズーム  s:保存  m:モード  c/Esc:終了"
+    on ? "調整モード ── ←↑↓→:位置  +/-:ズーム  f/v:文字サイズ  0:リセット  s:保存  m:モード  c/Esc:終了"
        : "調整モードを終了",
     on ? 3000 : 1600
   );
@@ -953,6 +986,15 @@ document.addEventListener("keydown", (e) => {
         break;
       case "0":
         calib({ reset: true });
+        applyUiScale(1.0);
+        toast("調整をリセットしました (文字サイズも既定へ)");
+        break;
+      // UIの文字サイズ。'+/-' はズームに取られているので隣の f/v を当てる。
+      case "f":
+        toast(`文字サイズ ${applyUiScale(uiScale + STEP_UI_SCALE)}`);
+        break;
+      case "v":
+        toast(`文字サイズ ${applyUiScale(uiScale - STEP_UI_SCALE)}`);
         break;
       case "s":
         saveCalib();
@@ -1001,8 +1043,8 @@ document.addEventListener("keydown", (e) => {
       toggleVideo();
       break;
     // 調整は 'c' の中だけに置いた。押し間違いを黙って捨てず行き先を案内する。
-    case "+": case "=": case "-": case "0": case "s":
-      toast("ズーム・位置の調整は 'c' で調整モードへ");
+    case "+": case "=": case "-": case "0": case "s": case "f": case "v":
+      toast("ズーム・位置・文字サイズの調整は 'c' で調整モードへ");
       break;
     default:
       // [DEBUG] 意匠の切り替え。意匠決定後はこの節ごと削除する。
@@ -1240,7 +1282,7 @@ function render(payload) {
   const themePart = DEBUG_THEME_KEYS
     ? ` | 意匠 ${THEMES[themeIndex].name}(1-${THEMES.length}で切替)` : "";
   const hint = calibMode
-    ? ` | 調整中: ←↑↓→:位置  +/-:ズーム  0:リセット  s:保存  m:モード  c/Esc:終了`
+    ? ` | 調整中: ←↑↓→:位置  +/-:ズーム  f/v:文字サイズ  0:リセット  s:保存  m:モード  c/Esc:終了`
     : mode === MODE_SINGLE
     ? ` | m:モード  ←↑↓→:対象選択  Enter:固定  Esc:解除  c:調整  'd':映像`
     : ` | m:モード  c:調整  'd':映像`;
