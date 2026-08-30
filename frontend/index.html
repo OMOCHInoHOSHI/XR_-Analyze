@@ -43,8 +43,8 @@
 
   /* --- 鑑定盤 (モード表示と鑑定法の選択) ---
      色(--c)と書体(--face)は意匠から受け取るので、盤も意匠に合わせて変わる。
-     鑑定盤とデバッグ行は #ui の通常フローに積む。盤の高さは選択肢の開閉で
-     変わるため、デバッグ行を絶対配置にすると重なってしまう。 */
+     鑑定盤とデバッグ行は #ui の通常フローに積む。盤の中身はテキスト差し替えで
+     高さがほぼ変わらないが、報せ (p-msg) で1行増えることはある。 */
   #ui { position: absolute; top: 8px; left: 10px; pointer-events: none; }
   #panel { position: relative; display: inline-block;
     background: rgba(0, 14, 22, .55); color: var(--c);
@@ -66,12 +66,6 @@
   .p-title { font-weight: 700; }
   .p-key { opacity: .6; margin-right: 12px; }
   #p-modename::before { content: "◇ "; }
-  /* 調整モード中だけ開くキー案内。既定は閉じたまま。
-     モードの選択肢は円盤 (#wheel) へ移した (理由: docs/adr/0021-mode-wheel-with-calibration.md) */
-  .p-calib { display: none; margin-top: 3px; }
-  .p-calib div { white-space: nowrap; }
-  .p-ck { display: inline-block; min-width: 5.6em; opacity: .75; }
-  .p-ck::before { content: "◇ "; }
   .p-msg { display: none; margin-top: 3px; opacity: .9; }
   /* デバッグ行(fps・調整値・意匠・キー一覧)。盤の下に小さく置く。 */
   #hud { margin-top: 6px; font-size: 12px; opacity: .75; color: var(--c);
@@ -167,6 +161,21 @@
   .e-key { opacity: .6; font-size: calc(15px * var(--ui-scale)); align-self: center; white-space: nowrap; }
   /* 本文。説明文は文章なので字間は締め、行間は広めに取る。 */
   #e-body { font-size: calc(21px * var(--ui-scale)); line-height: 1.75; letter-spacing: .05em; }
+
+  /* --- 調整モードの案内窓 ('c' で調整モード中だけ中央へ出す) ---
+     左上の盤に積んでいたが、グラスでは視界の中心のほうが読み取りやすい
+     (円盤・鑑定窓を中央へ置いたのと同じ理由: docs/adr/0021-mode-wheel-with-calibration.md)。
+     窓なので円盤・鑑定窓と同じ --ui-scale の拡大率が効く。 */
+  #calib-guide { position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); display: none; pointer-events: none;
+    background: rgba(0, 14, 22, .78); color: var(--c);
+    border: 1px solid var(--c); padding: 8px 18px 10px;
+    font-family: var(--face); }
+  #calib-guide.on { display: block; animation: e-in .16s ease-out; }
+  .cg-row { white-space: nowrap; font-size: calc(21px * var(--ui-scale));
+    line-height: 1.8; letter-spacing: .12em; }
+  .cg-key { display: inline-block; min-width: 5.6em; opacity: .75; }
+  .cg-key::before { content: "◇ "; }
 
   /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
   .box { position: absolute; box-sizing: border-box;
@@ -422,6 +431,20 @@
     </div>
     <div id="e-body"></div>
   </div>
+  <!-- 調整モードの案内窓。調整モード中だけ中央へ出す。左上の盤に積んでいたが、
+       グラスでは中心のほうが読み取りやすい。 -->
+  <div id="calib-guide">
+    <div class="e-head">
+      <span class="e-name">調 整</span>
+      <span class="e-key">c / Esc で終える</span>
+    </div>
+    <div class="cg-row"><span class="cg-key">←↑↓→</span>切り抜き位置</div>
+    <div class="cg-row"><span class="cg-key">+ / -</span>ズーム</div>
+    <div class="cg-row"><span class="cg-key">f / v</span>文字サイズ</div>
+    <div class="cg-row"><span class="cg-key">0</span>リセット</div>
+    <div class="cg-row"><span class="cg-key">s</span>保存</div>
+    <div class="cg-row"><span class="cg-key">m</span>モードへ</div>
+  </div>
   <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
        (検出名を扱うため innerHTML は使わない)。 -->
   <div id="ui">
@@ -431,15 +454,6 @@
         <span class="p-title">鑑 定 眼</span><span id="p-state">待機</span>
       </div>
       <div><span class="p-key">鑑定法</span><span id="p-modename">広域鑑定</span></div>
-      <div class="p-calib" id="p-calib">
-        <div><span class="p-ck">←↑↓→</span>切り抜き位置</div>
-        <div><span class="p-ck">+ / -</span>ズーム</div>
-        <div><span class="p-ck">f / v</span>文字サイズ</div>
-        <div><span class="p-ck">0</span>リセット</div>
-        <div><span class="p-ck">s</span>保存</div>
-        <div><span class="p-ck">m</span>モードへ</div>
-        <div><span class="p-ck">c / Esc</span>調整を終える</div>
-      </div>
       <div class="p-msg" id="p-msg"></div>
     </div>
     <div id="hud">connecting…</div>
@@ -473,7 +487,7 @@ const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
 const pState = document.getElementById("p-state");
 const pModeName = document.getElementById("p-modename");
-const pCalib = document.getElementById("p-calib");
+const calibGuide = document.getElementById("calib-guide");
 const pMsg = document.getElementById("p-msg");
 const reticle = document.getElementById("reticle");
 const wheel = document.getElementById("wheel");
@@ -1266,7 +1280,8 @@ function render(payload) {
     : selLostAt ? "見失い"
     : selLocked ? "固定" : "選択中";
   pModeName.textContent = MODE_LABEL[mode];
-  pCalib.style.display = calibMode ? "block" : "none";
+  // 調整モードの案内窓。左上の盤(#panel)ではなく中央の窓へ出す
+  calibGuide.classList.toggle("on", calibMode);
   const msg = Date.now() < toastUntil ? toastText : "";
   pMsg.textContent = msg;
   pMsg.style.display = msg ? "block" : "none";
