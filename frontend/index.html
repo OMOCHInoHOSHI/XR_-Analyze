@@ -158,18 +158,34 @@
     border-bottom: 1px solid rgba(255, 255, 255, .18);
     margin-bottom: 5px; padding-bottom: 2px; }
   .e-name { font-weight: 700; font-size: calc(24px * var(--ui-scale)); letter-spacing: .12em; }
-  /* 見出し右側の「読み上げ準備中…」+「Enter/Esc で閉じる」をまとめる。
-     e-head 自体に3つ目の子を足すと space-between で真ん中に寄ってしまうため、
-     右側だけをひとつの flex item にして今までの2分割の見た目を保つ。 */
-  .e-head-right { display: flex; align-items: center; gap: 12px; }
   .e-key { opacity: .6; font-size: calc(15px * var(--ui-scale)); align-self: center; white-space: nowrap; }
-  /* 読み上げの音声を取りに行っている間だけ出す。先読み合成(docs/adr/0027-speech-
-     prefetch-during-generation.md)が効かない場合など、鑑定文が出てから声が鳴るまで
-     数秒空くことがあり、その間なにも表示されないと読み上げの有無が利用者に伝わらない。
-     既定は隠し、JSがON/OFFする。 */
-  #e-speak-wait { display: none; }
   /* 本文。説明文は文章なので字間は締め、行間は広めに取る。 */
   #e-body { font-size: calc(21px * var(--ui-scale)); line-height: 1.75; letter-spacing: .05em; }
+  /* 読み上げの音声を取りに行っている間だけ、本文の下に帯として出す。見出しの隅に
+     小さく出していたが「待機中だと分からない」との指摘を受け、本文と並ぶ独立した
+     行にした。先読み合成(docs/adr/0027-speech-prefetch-during-generation.md)が
+     効かない場合など、鑑定文が出てから声が鳴るまで数秒空くことがあり、その間なにも
+     表示されないと読み上げの有無が利用者に伝わらない。既定は隠し、JSがON/OFFする。 */
+  #e-wait { display: none; margin-top: 8px; padding-top: 5px;
+    border-top: 1px solid rgba(255, 255, 255, .18);
+    font-size: calc(15px * var(--ui-scale)); letter-spacing: .12em; opacity: .85; }
+  /* 盤(#p-modename)・調整窓(.cg-key)と同じ菱形を頭に付け、意匠から浮かないようにする。 */
+  #e-wait::before { content: "◇ "; }
+  /* 動く印。●が順に灯っていくことで「待っている」ことを示す。色は意匠の --c を
+     そのまま使い、新しい色は増やさない。 */
+  .e-wait-dots { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
+  .e-wait-dots i { display: inline-block; width: calc(6px * var(--ui-scale));
+    height: calc(6px * var(--ui-scale)); border-radius: 50%; background: var(--c);
+    opacity: .25; animation: wait-pulse 1.2s ease-in-out infinite; }
+  .e-wait-dots i:nth-child(2) { animation-delay: .2s; }
+  .e-wait-dots i:nth-child(3) { animation-delay: .4s; }
+  @keyframes wait-pulse {
+    0%, 100% { opacity: .25; }
+    40% { opacity: 1; } }
+  /* 動きを控える設定では点滅を止める(#wheel の reduced-motion 対応と同じ考え方)。 */
+  @media (prefers-reduced-motion: reduce) {
+    .e-wait-dots i { animation: none; opacity: .6; }
+  }
 
   /* --- 調整モードの案内窓 ('c' で調整モード中だけ中央へ出す) ---
      左上の盤に積んでいたが、グラスでは視界の中心のほうが読み取りやすい
@@ -436,12 +452,12 @@
   <div id="explain">
     <div class="e-head">
       <span class="e-name" id="e-name"></span>
-      <span class="e-head-right">
-        <span class="e-key" id="e-speak-wait">読み上げ準備中…</span>
-        <span class="e-key">Enter/Esc で閉じる</span>
-      </span>
+      <span class="e-key">Enter/Esc で閉じる</span>
     </div>
     <div id="e-body"></div>
+    <!-- 読み上げの音声を待っている間だけ出す帯。動く印(dots)は装飾なので
+         aria-hidden にする(文言側だけで用は足りる)。 -->
+    <div id="e-wait">鑑定士が口を開くまで<span class="e-wait-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
   </div>
   <!-- 調整モードの案内窓。調整モード中だけ中央へ出す。左上の盤に積んでいたが、
        グラスでは中心のほうが読み取りやすい。 -->
@@ -506,7 +522,7 @@ const wheel = document.getElementById("wheel");
 const explainWin = document.getElementById("explain");
 const eName = document.getElementById("e-name");
 const eBody = document.getElementById("e-body");
-const eSpeakWait = document.getElementById("e-speak-wait");
+const eWait = document.getElementById("e-wait");
 let showVideo = true;
 
 const STEP_ZOOM = 0.1;
@@ -695,7 +711,7 @@ let speakSeq = 0;        // 遅れて届いた音声を捨てるための世代�
 // ことがあり(docs/adr/0027-speech-prefetch-during-generation.md)、無表示だと
 // 読み上げの有無が利用者に伝わらないため。
 function setSpeakWait(on) {
-  eSpeakWait.style.display = on ? "inline" : "none";
+  eWait.style.display = on ? "block" : "none";
 }
 
 function stopSpeak() {

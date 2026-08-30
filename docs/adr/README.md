@@ -48,6 +48,8 @@
 | [0030](0030-wheel-turns-with-the-key.md) | ~~円盤は矢印の向きと同じ向きに回す~~ (0031 で置換) | `frontend/index.html` |
 | [0031](0031-wheel-layout-restored.md) | 円盤の配置と回転の向きを ADR-0023 の形に戻す | `frontend/index.html` |
 | [0032](0032-prompt-shutdown.md) | 終了は処理中のリクエストを待たずに打ち切る | `server.py` / `config.py` |
+| [0033](0033-readout-wait-is-shown.md) | 読み上げの待ちは本文の下に帯で示す | `frontend/index.html` |
+| [0034](0034-streams-close-themselves.md) | 終了の合図でストリームを自分から閉じる | `server.py` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は

@@ -42,6 +42,15 @@ from .pipeline import Pipeline
 pipeline: Pipeline | None = None
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
+# 終了の合図。Ctrl+C (SIGINT/SIGTERM) を受けた"瞬間"に立てる。/ws (async) と
+# /video (同期ジェネレータ) の両方から読むため threading.Event を使う。
+# lifespan の終了処理で立てるのでは遅い: lifespan の finally が走るのは
+# uvicorn が「接続の終了待ち」を終えた後であり、その時点では /video の
+# 無限ループ (while True) は自分から終わらないため、SHUTDOWN_GRACE_SEC 経過後の
+# 強制キャンセルに必ず捕まってしまう(理由: docs/adr/0032-prompt-shutdown.md)。
+# main() でシグナルハンドラに割り込み、キャンセルされる前にループへ知らせる。
+_shutting_down = threading.Event()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -484,6 +493,11 @@ async def ws_detections(ws: WebSocket):
     last_sent = -1
     try:
         while True:
+            # 終了の合図が立っていたら、接続を保ったまま自分から抜ける
+            # (理由: docs/adr/0032-prompt-shutdown.md の追補。uvicorn の強制キャンセル
+            # 経路に入る前に閉じることで、CancelledError のトレースバックを防ぐ)
+            if _shutting_down.is_set():
+                return
             # 新しいフレームのときだけ組み立てて送る(無駄な再送とJSON化を防ぐ)
             if pipeline is not None and pipeline.frame_id != last_sent:
                 payload = pipeline.detections_payload()
@@ -502,6 +516,11 @@ def _mjpeg_generator(annotate: bool):
     encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.JPEG_QUALITY]
     last_sent = -1
     while True:
+        # 終了の合図が立っていたら自分から抜ける(理由: ws_detections と同じ。
+        # docs/adr/0032-prompt-shutdown.md の追補)。time.sleep で待っている間に
+        # 立つので、ループの先頭で見るだけでよい。
+        if _shutting_down.is_set():
+            return
         if pipeline is None:
             time.sleep(0.05)
             continue
@@ -546,14 +565,31 @@ def main() -> None:
 
     print(f"[XR Analyze] http://{config.HOST}:{config.PORT}  (model={config.MODEL})")
     # timeout_graceful_shutdown を渡さないと、Ctrl+C のあと処理中の /explain や
-    # /speak が終わるまで待ち続ける (理由: docs/adr/0032-prompt-shutdown.md)
-    uvicorn.run(
+    # /speak が終わるまで待ち続ける (理由: docs/adr/0032-prompt-shutdown.md)。
+    # これは保険として残す。/ws・/video が何らかの理由で自分から抜けられなかった
+    # 場合の最後の砦になる。
+    server_config = uvicorn.Config(
         app,
         host=config.HOST,
         port=config.PORT,
         log_level="info",
         timeout_graceful_shutdown=config.SHUTDOWN_GRACE_SEC,
     )
+    server = uvicorn.Server(server_config)
+
+    # Ctrl+C (SIGINT) / SIGTERM を受けた"瞬間"に _shutting_down を立てる。
+    # uvicorn.Server.handle_exit はシグナルハンドラそのものなので、ここに割り込めば
+    # 「接続の終了待ち」が始まるより前に /ws・/video のループへ知らせられる。
+    # lifespan の終了処理(finally)で立てるのでは遅く、その時点では既に
+    # SHUTDOWN_GRACE_SEC 超過の強制キャンセルに入ってしまっている。
+    original_handle_exit = server.handle_exit
+
+    def handle_exit(sig, frame):
+        _shutting_down.set()
+        original_handle_exit(sig, frame)
+
+    server.handle_exit = handle_exit
+    server.run()
 
 
 if __name__ == "__main__":
