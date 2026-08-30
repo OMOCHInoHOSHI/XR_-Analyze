@@ -233,6 +233,12 @@ ollama serve                 # 起動 (http://localhost:11434)
 できます(下記「設定 (環境変数で上書き)」参照)。鑑定文は検出ラベルのみから生成する
 ため、画角に見えている個体の特徴(色・状態など)は含まれません。
 
+鑑定文は表示と同時に音声でも読み上げられます(macOS 同梱の `say` コマンドで
+サーバ側が音声を合成)。声の選定経緯は [ADR-0025](docs/adr/0025-inspector-voice-readout.md)
+を参照してください。`TTS_BACKEND` / `TTS_VOICE` / `TTS_RATE` の環境変数で上書き
+できます(下記「設定 (環境変数で上書き)」参照)。ターミナルで `say -v '?'` を実行
+すると、導入済みの声を一覧できます。
+
 ## 枠の意匠 (デザイン候補の切り替え) ※暫定
 
 テーマに合わせた枠デザインを見比べるための**暫定機能**です。
@@ -326,6 +332,10 @@ python3 -m backend.build_ja_dict
 | `OLLAMA_URL` | http://localhost:11434 | AI説明(上記「固定した物体の AI 説明」)で呼ぶ Ollama のアドレス |
 | `OLLAMA_MODEL` | gemma4:e4b | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名 |
 | `EXPLAIN_TIMEOUT_SEC` | 30.0 | AI説明の生成完了を待つ上限秒。初回生成は実測約7.5秒 |
+| `TTS_BACKEND` | say(macOS) / off(それ以外) | 鑑定文の読み上げ方式。`say`(macOS同梱コマンド) / `off`(無効) |
+| `TTS_VOICE` | Grandpa | 読み上げの声。`say -v '?'` で導入済みの声を一覧できる |
+| `TTS_RATE` | 130 | 読み上げの話速(words/min相当)。say の既定175より遅く、重々しく読ませる |
+| `TTS_TIMEOUT_SEC` | 20.0 | 読み上げの合成完了を待つ上限秒。実測は1件あたり約0.5秒(初回のみ約2秒) |
 
 > Apple Silicon(M1〜)では `DEVICE` を指定しなくても自動で `mps`(GPU)が有効に
 > なります。明示的にCPUを使いたい場合のみ `DEVICE=cpu` を指定してください。

@@ -10,6 +10,7 @@
   POST /calib       -> 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ)
   POST /calib/save  -> 現在の調整値をファイルへ保存 (次回起動時に自動で復元)
   POST /explain     -> 物体ラベルから日本語の説明文を生成 (Ollama のローカルLLM)
+  POST /speak       -> 鑑定文の読み上げ音声(WAV)を返す (macOS の say)
 
 起動:
   cd "XR_ Analyze"
@@ -22,15 +23,16 @@ import json
 import time
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import cv2
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from . import calib_store, config
+from . import calib_store, config, tts
 from .detector import Detector
 from .pipeline import Pipeline
 
@@ -137,6 +139,12 @@ async def calib_save():
 # 再生成はしない。プロセスを起動し直せば消える(恒久保存はしない方針)。
 _explain_cache: dict[str, str] = {}
 
+# 読み上げ音声のキャッシュ (label -> WAVバイト列)。説明文キャッシュと違い
+# 1件あたり0.5〜1.0MBと大きいため、無制限には溜めず古いものから捨てる
+# (32件で最大32MBほど。理由: docs/adr/0025-inspector-voice-readout.md)。
+_speak_cache: OrderedDict[str, bytes] = OrderedDict()
+_SPEAK_CACHE_MAX = 32
+
 
 class ExplainRequest(BaseModel):
     """説明を生成する物体。label は検出ラベル(英語)、ja はフロントの日本語表示名(任意)。"""
@@ -215,6 +223,38 @@ def explain(req: ExplainRequest):
     text = _ollama_explain(req.label, req.ja)
     _explain_cache[req.label] = text
     return {"label": req.label, "text": text}
+
+
+class SpeakRequest(BaseModel):
+    """読み上げる鑑定文。label はキャッシュのキー、text は本文。"""
+
+    label: str
+    text: str
+
+
+@app.post("/speak")
+def speak(req: SpeakRequest):
+    """
+    鑑定文を読み上げた音声(WAV)を返す(フロントの説明ウィンドウ用)。
+
+    合成は macOS の say コマンドで行う(実装: backend/tts.py)。同一ラベルは
+    キャッシュを返し、再合成はしない。
+    """
+    cached = _speak_cache.get(req.label)
+    if cached is not None:
+        _speak_cache.move_to_end(req.label)
+        return Response(content=cached, media_type="audio/wav")
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="読み上げる文がありません")
+    try:
+        data = tts.synthesize(text)
+    except tts.TTSUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    _speak_cache[req.label] = data
+    while len(_speak_cache) > _SPEAK_CACHE_MAX:
+        _speak_cache.popitem(last=False)
+    return Response(content=data, media_type="audio/wav")
 
 
 @app.websocket("/ws")

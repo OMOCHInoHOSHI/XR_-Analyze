@@ -584,6 +584,7 @@ function openExplain(target) {
   const cached = explainCache.get(target.label);
   if (cached !== undefined) {
     eBody.textContent = cached;
+    speak(target.label, cached);
   } else {
     eBody.textContent = "鑑定中…";
     requestExplain(target.label, target.label_ja || target.label);
@@ -593,6 +594,7 @@ function openExplain(target) {
 }
 
 function closeExplain() {
+  stopSpeak();
   explainOpen = false;
   explainLabel = null;
   renderExplain();
@@ -616,13 +618,52 @@ function requestExplain(label, name) {
     })
     .then((d) => {
       explainCache.set(d.label, d.text);
-      if (explainOpen && explainLabel === d.label) eBody.textContent = d.text;
+      if (explainOpen && explainLabel === d.label) {
+        eBody.textContent = d.text;
+        speak(d.label, d.text);
+      }
     })
     .catch((err) => {
       if (!(explainOpen && explainLabel === label)) return;
       eBody.textContent = err.message || "鑑定に失敗しました";
       setToast("鑑定に失敗しました ── Ollama が起動しているか確認してください", 3000);
     });
+}
+
+// --- 鑑定文の読み上げ ---------------------------------------------------------
+// 説明ウィンドウに鑑定文が出たら、それを声(サーバ側 /speak → say)で読み上げる。
+// 音声はあくまで補助機能なので、失敗しても説明文の表示には一切影響させない
+// (取得失敗のtoastも出さない。表示さえできれば鑑定としては成立するため)。
+let speakAudio = null;   // 再生中の Audio
+let speakSeq = 0;        // 遅れて届いた音声を捨てるための世代番号(窓を閉じた/対象が変わった後の再生を防ぐ)
+
+function stopSpeak() {
+  speakSeq++;
+  if (speakAudio) {
+    speakAudio.pause();
+    URL.revokeObjectURL(speakAudio.src);
+    speakAudio = null;
+  }
+}
+
+function speak(label, text) {
+  stopSpeak();
+  const seq = speakSeq;
+  fetch("/speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, text }),
+  })
+    .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
+    .then((blob) => {
+      if (seq !== speakSeq) return;   // 待つ間に窓が閉じた/対象が変わった
+      const a = new Audio(URL.createObjectURL(blob));
+      // 最後まで鳴り終えた分はその場で解放する。途中で止めた分は stopSpeak が始末する。
+      a.addEventListener("ended", () => URL.revokeObjectURL(a.src));
+      speakAudio = a;
+      a.play().catch(() => {});   // 自動再生が拒否されても黙って諦める
+    })
+    .catch(() => {});   // 読み上げの失敗は鑑定の表示に影響させない
 }
 
 // --- [DEBUG] 意匠(デザイン)の切り替え ---------------------------------------

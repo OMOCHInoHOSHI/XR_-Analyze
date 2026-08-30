@@ -198,3 +198,17 @@ OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
 # 生成完了を待つ上限秒。初回生成は実機で約7.5秒かかるため20秒以上を推奨。
 EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 30.0)
+
+# --- 読み上げ (TTS) ---
+# 鑑定文を音声で読み上げる。選択肢は "say"(macOS同梱コマンド) / "off"(無効)。
+# macOS以外には say が無いため、既定は Darwin のときだけ "say"、それ以外は "off"。
+_default_tts = "say" if platform.system() == "Darwin" else "off"
+TTS_BACKEND: str = os.environ.get("TTS_BACKEND", _default_tts).strip().lower()
+# 声の種類。ターミナルで `say -v '?'` を実行すると導入済みの声を一覧できる。
+# Grandpa(老翁の声)を既定にしているのは、無口な職人鑑定士という人物像に寄せた
+# 選択のため (経緯: docs/adr/0025-inspector-voice-readout.md)。
+TTS_VOICE: str = os.environ.get("TTS_VOICE", "Grandpa")
+# 話速(words/min相当)。say の既定は175だが、重々しく読ませるため落としてある。
+TTS_RATE: int = _int("TTS_RATE", 130)
+# 合成完了を待つ上限秒。実測は鑑定文1件あたり約0.5秒(初回のみ声の読み込みで約2秒)。
+TTS_TIMEOUT_SEC: float = _float("TTS_TIMEOUT_SEC", 20.0)
