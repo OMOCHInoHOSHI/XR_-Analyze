@@ -589,7 +589,13 @@ def main() -> None:
         original_handle_exit(sig, frame)
 
     server.handle_exit = handle_exit
-    server.run()
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        # uvicorn は graceful shutdown 完了後に SIGINT を再送出する (capture_signals)。
+        # これは仕様であり、サーバ自体は正常終了済み。トレースバック表示を抑えるため
+        # ここで吸収する。
+        pass
 
 
 if __name__ == "__main__":
