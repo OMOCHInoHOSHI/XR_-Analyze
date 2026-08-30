@@ -42,6 +42,10 @@
 | [0024](0024-llm-object-explanation.md) | 固定した物体の説明はローカルLLM (Ollama) で生成する | `server.py` / `config.py` / `frontend/index.html` |
 | [0025](0025-inspector-voice-readout.md) | 鑑定文の読み上げは macOS 同梱の `say` で合成し、方式は差し替え可能にする | `tts.py` / `server.py` / `frontend/index.html` |
 | [0026](0026-voicevox-character-voice.md) | 読み上げの既定を VOICEVOX のキャラクター音声にする | `tts.py` / `config.py` |
+| [0027](0027-speech-prefetch-during-generation.md) | 読み上げ音声は鑑定文の生成中に先読みして合成する | `server.py` / `tts.py` |
+| [0028](0028-readout-holds-the-target.md) | 読み上げている間は見失っても対象を解除しない | `frontend/index.html` |
+| [0029](0029-mode-persistence.md) | 直前のモードを次の起動へ引き継ぐ | `frontend/index.html` |
+| [0030](0030-wheel-turns-with-the-key.md) | 円盤は矢印の向きと同じ向きに回す | `frontend/index.html` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は

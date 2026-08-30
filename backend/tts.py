@@ -12,12 +12,14 @@ docs/adr/0026-voicevox-character-voice.md
 """
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 from pathlib import Path
 
 from . import config
@@ -134,3 +136,42 @@ def _voicevox(text: str) -> bytes:
     if not data:
         raise TTSUnavailable("読み上げの合成結果が空でした")
     return data
+
+
+def concat_wav(parts: list[bytes]) -> bytes:
+    """
+    複数のWAVバイト列を1本に結合する。
+
+    鑑定文を文単位で先読み合成した結果 (`server.py` の先読みジョブ) を
+    1つのWAVにまとめるために使う。先頭パートのフォーマット
+    (チャンネル数・サンプル幅・サンプリングレート)を採用し、以降のパートは
+    フレームだけを追記する。VOICEVOXは話者が同じなら揃うはずだが、念のため
+    フォーマットが食い違うパートは捨ててログに残す。
+    """
+    if not parts:
+        raise TTSUnavailable("結合するWAVがありません")
+    if len(parts) == 1:
+        return parts[0]
+
+    with wave.open(io.BytesIO(parts[0]), "rb") as first:
+        nchannels = first.getnchannels()
+        sampwidth = first.getsampwidth()
+        framerate = first.getframerate()
+        frames = [first.readframes(first.getnframes())]
+
+    for i, part in enumerate(parts[1:], start=2):
+        with wave.open(io.BytesIO(part), "rb") as w:
+            if (w.getnchannels(), w.getsampwidth(), w.getframerate()) != (
+                nchannels, sampwidth, framerate,
+            ):
+                print(f"[tts] concat_wav: {i}番目の断片はフォーマットが異なるため捨てます")
+                continue
+            frames.append(w.readframes(w.getnframes()))
+
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(nchannels)
+        w.setsampwidth(sampwidth)
+        w.setframerate(framerate)
+        w.writeframes(b"".join(frames))
+    return out.getvalue()

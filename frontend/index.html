@@ -158,7 +158,16 @@
     border-bottom: 1px solid rgba(255, 255, 255, .18);
     margin-bottom: 5px; padding-bottom: 2px; }
   .e-name { font-weight: 700; font-size: calc(24px * var(--ui-scale)); letter-spacing: .12em; }
+  /* 見出し右側の「読み上げ準備中…」+「Enter/Esc で閉じる」をまとめる。
+     e-head 自体に3つ目の子を足すと space-between で真ん中に寄ってしまうため、
+     右側だけをひとつの flex item にして今までの2分割の見た目を保つ。 */
+  .e-head-right { display: flex; align-items: center; gap: 12px; }
   .e-key { opacity: .6; font-size: calc(15px * var(--ui-scale)); align-self: center; white-space: nowrap; }
+  /* 読み上げの音声を取りに行っている間だけ出す。先読み合成(docs/adr/0027-speech-
+     prefetch-during-generation.md)が効かない場合など、鑑定文が出てから声が鳴るまで
+     数秒空くことがあり、その間なにも表示されないと読み上げの有無が利用者に伝わらない。
+     既定は隠し、JSがON/OFFする。 */
+  #e-speak-wait { display: none; }
   /* 本文。説明文は文章なので字間は締め、行間は広めに取る。 */
   #e-body { font-size: calc(21px * var(--ui-scale)); line-height: 1.75; letter-spacing: .05em; }
 
@@ -427,7 +436,10 @@
   <div id="explain">
     <div class="e-head">
       <span class="e-name" id="e-name"></span>
-      <span class="e-key">Enter/Esc で閉じる</span>
+      <span class="e-head-right">
+        <span class="e-key" id="e-speak-wait">読み上げ準備中…</span>
+        <span class="e-key">Enter/Esc で閉じる</span>
+      </span>
     </div>
     <div id="e-body"></div>
   </div>
@@ -494,6 +506,7 @@ const wheel = document.getElementById("wheel");
 const explainWin = document.getElementById("explain");
 const eName = document.getElementById("e-name");
 const eBody = document.getElementById("e-body");
+const eSpeakWait = document.getElementById("e-speak-wait");
 let showVideo = true;
 
 const STEP_ZOOM = 0.1;
@@ -508,7 +521,14 @@ const UI_SCALE_MAX = 1.5;
 const STEP_UI_SCALE = 0.05;
 
 function loadUiScale() {
-  const v = parseFloat(localStorage.getItem(UI_SCALE_KEY));
+  // サイトデータを遮断した設定では localStorage に触れること自体が例外になる。
+  // ここはトップレベルから呼ばれるため、握り潰さないと起動ごと止まる
+  // (モードの復元と同じ扱い: docs/adr/0029-mode-persistence.md)。
+  let raw = null;
+  try {
+    raw = localStorage.getItem(UI_SCALE_KEY);
+  } catch {}
+  const v = parseFloat(raw);
   if (Number.isNaN(v)) return 1.0;
   return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, v));
 }
@@ -518,7 +538,10 @@ function applyUiScale(v) {
   const s = Math.round(Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, v)) * 100) / 100;
   uiScale = s;
   stage.style.setProperty("--ui-scale", s);
-  localStorage.setItem(UI_SCALE_KEY, String(s));
+  // 保存できなくても表示は済んでいる。覚えられないだけなので黙って続ける。
+  try {
+    localStorage.setItem(UI_SCALE_KEY, String(s));
+  } catch {}
   return s;
 }
 
@@ -543,7 +566,26 @@ const MODES = [
 ];
 const MODE_LABEL = {};
 for (const m of MODES) MODE_LABEL[m.id] = m.name;
-let mode = MODE_MULTI;
+
+// 直前に使っていた鑑定法を次回の起動へ引き継ぐ。UIの拡大率(UI_SCALE_KEY、上記)と
+// 同じ作法で localStorage に置く。調整は鑑定法ではなく一時的な状態なので保存の
+// 対象にしない(調整モードのまま終えても次回は既定の MODE_MULTI から始まる)。
+const MODE_KEY = "mode";
+
+function loadMode() {
+  // Cookie/サイトデータを遮断したブラウザ設定では localStorage へのアクセス自体が
+  // 例外を投げ、トップレベルの呼び出しなので握り潰さないとスクリプト全体が
+  // 止まって起動できなくなる。読めなければ既定(MODE_MULTI)へ倒す。
+  try {
+    const v = localStorage.getItem(MODE_KEY);
+    // 無い/壊れている/未知のモードIDなら既定(MODE_MULTI)へ
+    return v === MODE_SINGLE || v === MODE_MULTI ? v : MODE_MULTI;
+  } catch {
+    return MODE_MULTI;
+  }
+}
+
+let mode = loadMode();
 
 // --- モードの円盤 -----------------------------------------------------------
 // 'm' で画面中央に開く。数字なら即確定、矢印はカーソルを動かして Enter で確定。
@@ -598,7 +640,19 @@ function closeExplain() {
   explainOpen = false;
   explainLabel = null;
   renderExplain();
-  repaint();  // 消えた照準を戻す
+  // 窓を開いている間は見失いによる自動解除を止めていた (理由:
+  // docs/adr/0028-readout-holds-the-target.md)。閉じた時点で既に猶予を過ぎていれば、
+  // ここで通常どおり解除する。そうしないと「窓は閉じたのに見失い状態だけ残る」になる。
+  if (sel && selLostAt && Date.now() - selLostAt >= SEL_GRACE_MS) {
+    const wasLocked = selLocked;
+    clearSel();
+    // repaint() は関数末尾で1回だけ行う。toast() ではなく setToast() を使い、
+    // ここでの二重描画を避ける(見失いの猶予切れ分岐 visibleBoxes() と同じ作法)。
+    setToast(wasLocked
+      ? "固定を解除 ── 対象を見失いました"
+      : "選択を解除 ── 対象を見失いました");
+  }
+  repaint();  // 消えた照準を戻す(解除した場合は上の報せも一緒に描かれる)
 }
 
 // 説明文を取りに行く。届いたときに窓が別の対象へ変わっていたら捨てる。
@@ -637,8 +691,16 @@ function requestExplain(label, name) {
 let speakAudio = null;   // 再生中の Audio
 let speakSeq = 0;        // 遅れて届いた音声を捨てるための世代番号(窓を閉じた/対象が変わった後の再生を防ぐ)
 
+// 音声を取りに行っている間だけ「読み上げ準備中…」を出す。声が鳴るまで数秒かかる
+// ことがあり(docs/adr/0027-speech-prefetch-during-generation.md)、無表示だと
+// 読み上げの有無が利用者に伝わらないため。
+function setSpeakWait(on) {
+  eSpeakWait.style.display = on ? "inline" : "none";
+}
+
 function stopSpeak() {
   speakSeq++;
+  setSpeakWait(false);
   if (speakAudio) {
     speakAudio.pause();
     URL.revokeObjectURL(speakAudio.src);
@@ -649,6 +711,7 @@ function stopSpeak() {
 function speak(label, text) {
   stopSpeak();
   const seq = speakSeq;
+  setSpeakWait(true);
   fetch("/speak", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -657,13 +720,16 @@ function speak(label, text) {
     .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
     .then((blob) => {
       if (seq !== speakSeq) return;   // 待つ間に窓が閉じた/対象が変わった
+      setSpeakWait(false);
       const a = new Audio(URL.createObjectURL(blob));
       // 最後まで鳴り終えた分はその場で解放する。途中で止めた分は stopSpeak が始末する。
       a.addEventListener("ended", () => URL.revokeObjectURL(a.src));
       speakAudio = a;
       a.play().catch(() => {});   // 自動再生が拒否されても黙って諦める
     })
-    .catch(() => {});   // 読み上げの失敗は鑑定の表示に影響させない
+    .catch(() => {
+      if (seq === speakSeq) setSpeakWait(false);   // 読み上げの失敗は鑑定の表示に影響させない
+    });
 }
 
 // --- [DEBUG] 意匠(デザイン)の切り替え ---------------------------------------
@@ -769,6 +835,8 @@ function setMode(next) {
     return;
   }
   mode = next;
+  // 保存に失敗しても鑑定そのものは成立するので、読み込みと同じく黙って諦める。
+  try { localStorage.setItem(MODE_KEY, mode); } catch {}
   // 鑑定法をまたいで選択を残すと、広域鑑定中に見えない固定状態が残るため解除する。
   clearSel();
   currentTarget = null;
@@ -809,7 +877,9 @@ function selectMode(id) {
 }
 
 // 円盤の項目を作って円周上に並べる。角度は項目数から出すので、MODES に足すだけで
-// 配置が追従する。12時から時計回りに等間隔。
+// 配置が追従する。12時から反時計回りに等間隔(壱=12時 / 弐=8時 / 参=4時)。
+// 盤自体は逆に時計回りへ回すことで、→ を押した項目が12時へ滑ってくる
+// (理由: docs/adr/0030-wheel-turns-with-the-key.md)。
 function buildWheel() {
   wheelRotor = document.createElement("div");
   wheelRotor.className = "w-rotor";
@@ -828,7 +898,7 @@ function buildWheel() {
     now.className = "w-now";
     now.textContent = "現在";
     el.append(num, key, name, now);
-    const a = ((-90 + (360 / MODES.length) * i) * Math.PI) / 180;
+    const a = ((-90 - (360 / MODES.length) * i) * Math.PI) / 180;
     el.style.left = (50 + Math.cos(a) * WHEEL_R) + "%";
     el.style.top = (50 + Math.sin(a) * WHEEL_R) + "%";
     wheelRotor.appendChild(el);
@@ -840,13 +910,13 @@ buildWheel();
 
 // 項目1つ分の角度と、その項目を 12時へ持ってくるための盤の角度。
 const wheelStep = () => 360 / MODES.length;
-const wheelAngleFor = (i) => -i * wheelStep();
+const wheelAngleFor = (i) => i * wheelStep();
 
 // 隣へ1つ回す。delta は +1 が次、-1 が前。
 function turnBy(delta) {
   const n = MODES.length;
   wheelCursor = (wheelCursor + delta + n) % n;
-  wheelTurn -= delta * wheelStep();
+  wheelTurn += delta * wheelStep();
 }
 
 // 円盤の見た目だけを更新する。WSペイロードに依存しないので、まだ1フレームも
@@ -895,6 +965,7 @@ function closeWheel() {
 function onWheelKey(e) {
   e.preventDefault();
   // 盤そのものを回す。→↓ で次が、←↑ で前が、12時の指標へ滑ってくる。
+  // 盤は → で右回り(時計回り)に回る (理由: docs/adr/0030-wheel-turns-with-the-key.md)。
   if (e.key === "ArrowRight" || e.key === "ArrowDown") {
     turnBy(1);
     bumpWheelTimer();
@@ -1243,7 +1314,11 @@ function visibleBoxes(dets, r) {
       selLostAt = Date.now();
       // 新フレームが来なくても猶予切れで解除されるよう、期限後の描き直しを予約する。
       selGraceTimer = setTimeout(repaint, SEL_GRACE_MS + 50);
-    } else if (Date.now() - selLostAt >= SEL_GRACE_MS) {
+    } else if (!explainOpen && Date.now() - selLostAt >= SEL_GRACE_MS) {
+      // 窓(読み上げ中の説明ウィンドウ)が開いている間は自動解除しない。対象が
+      // カメラから外れても、開いている間は鑑定を継続中として扱う
+      // (理由: docs/adr/0028-readout-holds-the-target.md)。窓を閉じたときの
+      // 解除は closeExplain() 側で行う。
       const wasLocked = selLocked;
       clearSel();
       // render 中なので描き直しはしない

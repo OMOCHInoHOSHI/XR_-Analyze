@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import queue
+import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -139,11 +142,168 @@ async def calib_save():
 # 再生成はしない。プロセスを起動し直せば消える(恒久保存はしない方針)。
 _explain_cache: dict[str, str] = {}
 
+# ラベルごとの生成ロック。窓を閉じてもサーバ側の生成は止まらないため、
+# 「固定→窓を閉じる→固定解除→再固定」等で同じ未キャッシュのラベルに対する
+# /explain が並行に走りうる。ロック無しだとどちらの生成由来かを区別できず、
+# 先読み合成の断片(_speak_parts)が両者の文で混ざってしまう。ラベル単位で
+# 直列化し、LLMの二重呼び出しも防ぐ。COCO/LVIS語彙は有限なので、ロックの
+# 数が際限なく増える心配は無く、後始末も不要。
+_explain_locks: dict[str, threading.Lock] = {}
+_explain_locks_guard = threading.Lock()
+
+
+def _explain_lock_for(label: str) -> threading.Lock:
+    """ラベル専用の生成ロックを返す(無ければ作る)。"""
+    with _explain_locks_guard:
+        lock = _explain_locks.get(label)
+        if lock is None:
+            lock = threading.Lock()
+            _explain_locks[label] = lock
+        return lock
+
 # 読み上げ音声のキャッシュ (label -> WAVバイト列)。説明文キャッシュと違い
 # 1件あたり0.5〜1.0MBと大きいため、無制限には溜めず古いものから捨てる
 # (32件で最大32MBほど。理由: docs/adr/0025-inspector-voice-readout.md)。
 _speak_cache: OrderedDict[str, bytes] = OrderedDict()
 _SPEAK_CACHE_MAX = 32
+
+# --- 先読み合成(ストリーミングで確定した文を、鑑定文の生成中に裏で合成しておく) ---
+# 鑑定文の生成には約7.5秒かかる(docs/adr/0024-llm-object-explanation.md)。その間に
+# 文ごとの合成を進めておけば、全文が画面に出る頃には音声もほぼ揃っている。
+#
+# _speak_jobs: ラベルごとの「合成が完了したか」の合図。/speak はこれを待てる。
+# _speak_cache と同じ上限を共有し、キャッシュから追い出したラベルのジョブも捨てる。
+_speak_jobs: OrderedDict[str, threading.Event] = OrderedDict()
+_SPEAK_JOBS_MAX = _SPEAK_CACHE_MAX
+
+# ワーカースレッドだけが読み書きする作業領域。
+# label -> 合成済みWAV断片の並び(結合前)。
+_speak_parts: dict[str, list[bytes]] = {}
+# label -> ここまでの断片合成がすべて成功しているか(1つでも失敗したら False)。
+_speak_ok: dict[str, bool] = {}
+
+# 合成タスクのキュー。要素は (label, 文) で、文が None ならそのラベルの
+# 文がすべて出そろったことを示す「締め」の合図。
+# 単一のワーカースレッドが順番に処理するため、同じラベルの文が並行合成されて
+# 順序が狂うことはない。
+_speak_queue: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
+
+# _speak_cache / _speak_jobs / _speak_parts / _speak_ok はメインスレッド(FastAPIの
+# スレッドプール)とワーカースレッドの双方から触るため、変更はこのロックの下で行う。
+_speak_lock = threading.Lock()
+
+
+def _trim_speak_cache() -> None:
+    """_speak_cache の上限超過分を古い順に捨てる。対応するジョブも一緒に捨てる。"""
+    while len(_speak_cache) > _SPEAK_CACHE_MAX:
+        old_label, _ = _speak_cache.popitem(last=False)
+        _speak_jobs.pop(old_label, None)
+
+
+def _trim_speak_jobs() -> None:
+    """
+    _speak_jobs 単体の上限。合成完了前(まだキャッシュに乗っていない)のジョブが
+    大量に積み上がった場合の保険で、通常は _trim_speak_cache 側で一緒に減る。
+
+    追い出す Event は捨てる前に必ず set() する。しないと、締め処理が
+    _speak_jobs から見つけられずに set() し損ね、待っている /speak が
+    TTS_TIMEOUT_SEC を丸ごと使い切ってしまう(その後キャッシュが無ければ
+    退避路の同期合成に落ちるので、早く起こしてやるだけで無駄待ちが消える)。
+    """
+    while len(_speak_jobs) > _SPEAK_JOBS_MAX:
+        _, event = _speak_jobs.popitem(last=False)
+        event.set()
+
+
+def _enqueue_speak_sentence(label: str, sentence: str) -> None:
+    """一文を先読み合成キューに積む。ラベル初回ならジョブ(Event)も用意する。"""
+    with _speak_lock:
+        if label not in _speak_jobs:
+            _speak_jobs[label] = threading.Event()
+            _trim_speak_jobs()
+        _speak_ok.setdefault(label, True)
+    _speak_queue.put((label, sentence))
+
+
+def _finalize_speak_job(label: str) -> None:
+    """ラベルの文がすべて出そろったことをワーカーへ知らせる(締めの合図)。"""
+    _speak_queue.put((label, None))
+
+
+def _speak_worker() -> None:
+    """
+    先読み合成の専任スレッド。キューから (label, 文) を1件ずつ取り出し、
+    順番に合成する。文が None のときは「締め」の合図で、それまでに合成できた
+    断片を結合して _speak_cache へ格納し、待っている /speak を起こす。
+
+    tts.TTSUnavailable に加え、concat_wav が壊れた断片に対して投げうる
+    wave.Error/EOFError など想定外の例外もすべてここで受け止める。ここで
+    ワーカーが死ぬとキューを処理する者が誰もいなくなり、以後 Event が二度と
+    set() されず、あらゆる /speak が毎回 TTS_TIMEOUT_SEC 待ってから同期合成に
+    落ちる劣化状態がプロセス終了まで続いてしまうため。
+    """
+    while True:
+        label, sentence = _speak_queue.get()
+        try:
+            if sentence is None:
+                parts = _speak_parts.pop(label, [])
+                ok = _speak_ok.pop(label, False)
+                if ok and parts:
+                    try:
+                        data = tts.concat_wav(parts)
+                        with _speak_lock:
+                            _speak_cache[label] = data
+                            _trim_speak_cache()
+                    except Exception as e:
+                        print(f"[speak] 先読み結果の結合に失敗しました ({label}): {e}")
+                with _speak_lock:
+                    event = _speak_jobs.get(label)
+                if event is not None:
+                    event.set()
+            else:
+                try:
+                    data = tts.synthesize(sentence)
+                    _speak_parts.setdefault(label, []).append(data)
+                except Exception as e:
+                    print(f"[speak] 先読み合成に失敗しました ({label}): {e}")
+                    _speak_ok[label] = False
+        except Exception as e:
+            # 上の分岐で捕まえきれない想定外の失敗の保険。ラベルの残骸を捨て、
+            # 待っている /speak を解放してから次のジョブへ進む。
+            print(f"[speak] ワーカーで想定外のエラー ({label}): {e}")
+            _speak_parts.pop(label, None)
+            _speak_ok.pop(label, None)
+            with _speak_lock:
+                event = _speak_jobs.get(label)
+            if event is not None:
+                event.set()
+        finally:
+            _speak_queue.task_done()
+
+
+# デーモンスレッドとして常駐させる(プロセス終了時に道連れで終わってよい)。
+threading.Thread(target=_speak_worker, daemon=True).start()
+
+# 文の区切り。句読点(。！？!?)と改行を区切りとみなし、区切り文字は文に含めたまま切り出す。
+_SENTENCE_END_RE = re.compile(r"[。！？!?\n]")
+
+
+def _split_sentences(buffer: str) -> tuple[list[str], str]:
+    """
+    ストリーミング中のバッファから確定した文を切り出す。
+
+    区切り文字(。！？!?・改行)を含めたまま各文を返し、まだ区切りが来ていない
+    末尾は次回に持ち越すバッファとして返す。空白だけの断片は捨てる。
+    """
+    sentences: list[str] = []
+    start = 0
+    for m in _SENTENCE_END_RE.finditer(buffer):
+        end = m.end()
+        piece = buffer[start:end]
+        if piece.strip():
+            sentences.append(piece)
+        start = end
+    return sentences, buffer[start:]
 
 
 class ExplainRequest(BaseModel):
@@ -160,6 +320,11 @@ def _ollama_explain(label: str, ja: str | None) -> str:
     依存を増やさないため HTTP クライアントは stdlib の urllib で済ませる。
     この関数は同期 def なエンドポイントから呼ぶため、FastAPI がスレッドプールで
     実行し、イベントループを塞がない。
+
+    ストリーミング(stream:True)で受け、一文が確定するたびに読み上げの先読み
+    合成キューへ渡す。鑑定文の生成には約7.5秒かかるため、その裏で合成を
+    進めておけば、全文が画面に出る頃には音声もほぼ揃っている。ただし合成は
+    別スレッドで進むため、この関数(ひいては /explain)を遅らせることはない。
     """
     name = ja if ja else label
     # 鑑定士の人物像と2分岐ルール(昔からの道具は素直に/科学の産物は遺物として
@@ -182,7 +347,7 @@ def _ollama_explain(label: str, ja: str | None) -> str:
     body = json.dumps({
         "model": config.OLLAMA_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
+        "stream": True,
         "think": False,
         "options": {"temperature": 0.4, "num_predict": 150},
     }).encode("utf-8")
@@ -192,16 +357,44 @@ def _ollama_explain(label: str, ja: str | None) -> str:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    buffer = ""                  # 区切りがまだ来ていない末尾の断片
+    full_parts: list[str] = []   # 確定した文の並び。連結すると全文になる
+    job_started = False          # 先読みジョブを1文でも積んだか(締めの合図が要るか)
     try:
         with urllib.request.urlopen(req, timeout=config.EXPLAIN_TIMEOUT_SEC) as resp:
-            data = json.loads(resp.read())
+            # NDJSON: 1行1JSON。message.content を連結して全文を組み立てる
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                content = (chunk.get("message") or {}).get("content", "")
+                if content:
+                    buffer += content
+                    sentences, buffer = _split_sentences(buffer)
+                    for sentence in sentences:
+                        full_parts.append(sentence)
+                        _enqueue_speak_sentence(label, sentence)
+                        job_started = True
+                if chunk.get("done"):
+                    break
+        # 区切り文字が来ないまま終わった末尾も、最後の一文として合成に回す
+        if buffer.strip():
+            full_parts.append(buffer)
+            _enqueue_speak_sentence(label, buffer)
+            job_started = True
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
         # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける
         raise HTTPException(
             status_code=503,
             detail="鑑定の力 (Ollama) に接続できません。起動を確認してください (ollama serve)",
         ) from e
-    text = (data.get("message") or {}).get("content", "").strip()
+    finally:
+        # 1文でも積んだなら、合成は別スレッドで進む。締めの合図を必ず送り、
+        # 待っている /speak の Event が固まらないようにする。
+        if job_started:
+            _finalize_speak_job(label)
+    text = "".join(full_parts).strip()
     if not text:
         raise HTTPException(
             status_code=503, detail="鑑定文の生成が空でした。もう一度お試しください"
@@ -216,12 +409,22 @@ def explain(req: ExplainRequest):
 
     クラウドAPIではなくローカルLLM(Ollama)にした理由: docs/adr/0024-llm-object-explanation.md
     同一ラベルはキャッシュを返し、生成は1回だけ行う。
+
+    同一ラベルの生成はラベル単位のロックで直列化する(single-flight)。理由:
+    ロック無しで同じ未キャッシュのラベルに対する呼び出しが並行すると、
+    先読み合成の断片(_speak_parts)が両方の生成の文で混ざってしまうため。
     """
     cached = _explain_cache.get(req.label)
     if cached is not None:
         return {"label": req.label, "text": cached}
-    text = _ollama_explain(req.label, req.ja)
-    _explain_cache[req.label] = text
+    with _explain_lock_for(req.label):
+        # ロック待ちの間に先行呼び出しが生成を終えているかもしれない。その場合は
+        # LLMを呼ばずキャッシュを返す。
+        cached = _explain_cache.get(req.label)
+        if cached is not None:
+            return {"label": req.label, "text": cached}
+        text = _ollama_explain(req.label, req.ja)
+        _explain_cache[req.label] = text
     return {"label": req.label, "text": text}
 
 
@@ -237,13 +440,29 @@ def speak(req: SpeakRequest):
     """
     鑑定文を読み上げた音声(WAV)を返す(フロントの説明ウィンドウ用)。
 
-    合成は macOS の say コマンドで行う(実装: backend/tts.py)。同一ラベルは
-    キャッシュを返し、再合成はしない。
+    合成は VOICEVOX ENGINE / macOS の say コマンドで行う(実装: backend/tts.py)。
+    /explain のストリーミング中に文ごとの先読み合成(_speak_jobs)が進んでいれば
+    その完了を待ってから返す。先読みが無い(または間に合わなかった)場合は、
+    現状どおりその場で同期合成する(退避路)。同一ラベルはキャッシュを返し、
+    再合成はしない。
     """
-    cached = _speak_cache.get(req.label)
-    if cached is not None:
-        _speak_cache.move_to_end(req.label)
-        return Response(content=cached, media_type="audio/wav")
+    with _speak_lock:
+        cached = _speak_cache.get(req.label)
+        if cached is not None:
+            _speak_cache.move_to_end(req.label)
+            return Response(content=cached, media_type="audio/wav")
+        job = _speak_jobs.get(req.label)
+
+    if job is not None:
+        # /explain が先読み合成中(または合成済み)。終わるまで待ってからキャッシュを引く。
+        job.wait(timeout=config.TTS_TIMEOUT_SEC)
+        with _speak_lock:
+            cached = _speak_cache.get(req.label)
+            if cached is not None:
+                _speak_cache.move_to_end(req.label)
+                return Response(content=cached, media_type="audio/wav")
+
+    # 先読みが無かった/間に合わなかった場合の退避路: その場で同期合成する。
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="読み上げる文がありません")
@@ -251,9 +470,9 @@ def speak(req: SpeakRequest):
         data = tts.synthesize(text)
     except tts.TTSUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
-    _speak_cache[req.label] = data
-    while len(_speak_cache) > _SPEAK_CACHE_MAX:
-        _speak_cache.popitem(last=False)
+    with _speak_lock:
+        _speak_cache[req.label] = data
+        _trim_speak_cache()
     return Response(content=data, media_type="audio/wav")
 
 
