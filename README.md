@@ -354,8 +354,8 @@ python3 -m backend.build_ja_dict
 | `TTS_BACKEND` | voicevox | 鑑定文の読み上げ方式。`voicevox`(VOICEVOX ENGINE) / `say`(macOS同梱コマンド) / `off`(無効) |
 | `VOICEVOX_URL` | http://localhost:50021 | VOICEVOX ENGINE の接続先 |
 | `VOICEVOX_SPEAKER` | 82 | VOICEVOX の話者ID。既定は「青山龍星」のスタイル「不機嫌」。`GET /speakers` で一覧できる |
-| `VOICEVOX_SPEED` | 0.9 | VOICEVOX の話速(speedScale)。1.0が標準、小さいほど遅い |
-| `VOICEVOX_PITCH` | 0.0 | VOICEVOX の音高(pitchScale)。0.0が標準 |
+| `VOICEVOX_SPEED` | 1.0 | VOICEVOX の話速(speedScale)。1.0が標準、小さいほど遅い |
+| `VOICEVOX_PITCH` | -0.05 | VOICEVOX の音高(pitchScale)。0.0が標準、負で低い声になる |
 | `VOICEVOX_INTONATION` | 1.0 | VOICEVOX の抑揚(intonationScale)。1.0が標準 |
 | `TTS_VOICE` | Grandpa | (say専用)読み上げの声。`say -v '?'` で導入済みの声を一覧できる |
 | `TTS_RATE` | 130 | (say専用)読み上げの話速(words/min相当)。say の既定175より遅く、重々しく読ませる |

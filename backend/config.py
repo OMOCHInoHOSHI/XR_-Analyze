@@ -214,8 +214,8 @@ VOICEVOX_URL: str = os.environ.get("VOICEVOX_URL", "http://localhost:50021")
 # 無口な職人鑑定士という人物像に合う (経緯: docs/adr/0026-voicevox-character-voice.md)。
 # 他の声は ENGINE 起動中に `GET /speakers` で一覧できる。
 VOICEVOX_SPEAKER: int = _int("VOICEVOX_SPEAKER", 82)
-VOICEVOX_SPEED: float = _float("VOICEVOX_SPEED", 0.9)        # speedScale。1.0が標準、小さいほど遅い
-VOICEVOX_PITCH: float = _float("VOICEVOX_PITCH", 0.0)        # pitchScale。0.0が標準
+VOICEVOX_SPEED: float = _float("VOICEVOX_SPEED", 1.0)        # speedScale。1.0が標準、小さいほど遅い
+VOICEVOX_PITCH: float = _float("VOICEVOX_PITCH", -0.05)      # pitchScale。0.0が標準、負で低い声になる
 VOICEVOX_INTONATION: float = _float("VOICEVOX_INTONATION", 1.0)  # intonationScale。1.0が標準
 
 # 以下2つは TTS_BACKEND="say"(macOS専用)のときだけ使う設定。
