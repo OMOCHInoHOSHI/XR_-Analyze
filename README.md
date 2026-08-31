@@ -20,20 +20,6 @@ XR_ Analyze/
 └── README.md
 ```
 
-> 構成の設計判断: [ADR-0001](docs/adr/0001-monorepo-layout.md)
-
-| ドキュメント | 内容 |
-|---|---|
-| [docs/usage.md](docs/usage.md) | モードの切り替え・単体鑑定の対象選択・鑑定盤・枠の意匠 |
-| [docs/camera.md](docs/camera.md) | どのカメラが使われるかの確認と、スマートグラスへの画角合わせ込み |
-| [docs/voice.md](docs/voice.md) | 固定した物体のAI説明(Ollama)と読み上げ(VOICEVOX / macOS `say`) |
-| [docs/detection.md](docs/detection.md) | 検出モデルの切り替え・語彙の絞り込み・日本語化 |
-| [docs/configuration.md](docs/configuration.md) | 環境変数による設定一覧 |
-| [docs/api.md](docs/api.md) | エンドポイント一覧と `/ws` の出力フォーマット |
-| [docs/performance.md](docs/performance.md) | 速度の実測値と既知の制約 |
-| [docs/tech-stack.md](docs/tech-stack.md) | 使用技術の一覧 (ライブラリ・外部プロセス・モデル・実行環境) |
-| [docs/adr/](docs/adr/) | 「なぜこう作ったか」の設計判断の記録(ADR) |
-
 ## インストール方法
 
 Python 3.9+ を推奨。
