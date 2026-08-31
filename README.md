@@ -45,8 +45,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
 pip install -r backend/requirements.txt
 ```
 
-`(.venv)` が付けば有効化済み。抜けるときは `deactivate`。初回実行時、YOLOモデル
-(`yolov8n.pt`) は自動ダウンロードされます。
+`(.venv)` が付けば有効化済み。抜けるときは `deactivate`。初回実行時、YOLOモデルは自動ダウンロードされます。
 
 鑑定文の生成・読み上げには外部プロセスの **Ollama** と **VOICEVOX** が必要です。
 それぞれインストールして起動しておいてください。セットアップ手順とモデル取得、
