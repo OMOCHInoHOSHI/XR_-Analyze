@@ -41,6 +41,27 @@ def select_camera_index(
     )
 
 
+def reconnect_candidates(
+    recorded_index: int,
+    explicit_index: Optional[int],
+    prefer_name: str,
+) -> list[int]:
+    """
+    再接続時に試すべき index の候補を優先順で返す。
+      1. 起動時に開いていた index (記録したカメラ)
+      2. CAM_INDEX を明示していない場合だけ、CAM_NAME で名前再解決した index
+         (USB の抜き差しで index がずれても名前で追従するため)
+    CAM_INDEX が明示されているときは名前再解決をしない。起動時の選択方針と同じく
+    明示指定を最優先に尊重する (理由: docs/adr/0005-camera-selection.md)
+    """
+    candidates = [recorded_index]
+    if explicit_index is None and prefer_name:
+        idx = resolve_index_by_name(prefer_name)
+        if idx is not None and idx not in candidates:
+            candidates.append(idx)
+    return candidates
+
+
 # CAM_FLIP の値 -> cv2.flip の flipCode。None は反転しない。
 _FLIP_CODES: dict[str, Optional[int]] = {
     "180": -1,   # 上下+左右 = 180°回転
@@ -149,35 +170,57 @@ class Camera:
         self._out_size: Optional[tuple[int, int]] = None  # 直近read()の実サイズ(w,h)
 
     def open(self) -> None:
-        backend = _backend_for_os()
-        cap = cv2.VideoCapture(self.index, backend)
-        if not cap.isOpened():
-            # バックエンド指定で開けない場合はデフォルトで再試行
-            cap = cv2.VideoCapture(self.index)
-        if not cap.isOpened():
+        """カメラを開く。開けなければ RuntimeError(起動時は即座に失敗させる)。"""
+        if not self.try_open():
             raise RuntimeError(
                 f"カメラ index={self.index} を開けませんでした。"
                 " CAM_INDEX を変えるか、他アプリがカメラを使っていないか確認してください。"
             )
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_FPS, self.fps)
-        # 遅延を減らすためバッファを最小化(対応していないバックエンドでは無視される)
+    def try_open(self) -> bool:
+        """
+        カメラのオープンと初期設定を試み、成否を返す。
+
+        起動時は open() が RuntimeError で即座に失敗させるのに対し、稼働中の
+        再接続では「今は刺さっていないだけ」が普通に起こるため、例外ではなく
+        成否で返す (理由: docs/adr/0035-camera-auto-reconnect.md)
+        """
         try:
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except cv2.error:
-            pass
+            backend = _backend_for_os()
+            cap = cv2.VideoCapture(self.index, backend)
+            if not cap.isOpened():
+                # バックエンド指定で開けない場合はデフォルトで再試行
+                cap.release()
+                cap = cv2.VideoCapture(self.index)
+            if not cap.isOpened():
+                # 開けなかったリソースは捨てる。再接続は無限リトライになるため、
+                # 未開放の VideoCapture が試行のたびに溜まらないようにする
+                cap.release()
+                return False
 
-        # read() が self._cap を使うため、ウォームアップの前に代入しておく。
-        self._cap = cap
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            cap.set(cv2.CAP_PROP_FPS, self.fps)
+            # 遅延を減らすためバッファを最小化(対応していないバックエンドでは無視される)
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except cv2.error:
+                pass
 
-        # 1枚読めるまで self.read() でウォームアップする (理由: docs/adr/0007-viewport-crop-calibration.md)
-        for _ in range(5):
-            ok, _frame = self.read()
-            if ok:
-                break
-            time.sleep(0.05)
+            # read() が self._cap を使うため、ウォームアップの前に代入しておく。
+            self._cap = cap
+
+            # 1枚読めるまで self.read() でウォームアップする (理由: docs/adr/0007-viewport-crop-calibration.md)
+            for _ in range(5):
+                ok, _frame = self.read()
+                if ok:
+                    break
+                time.sleep(0.05)
+            return True
+        except Exception:
+            # 切断直後などオープンの最中に例外が出ても、再接続ループは止めない
+            self.release()
+            return False
 
     def grab(self):
         """(ok, frame) を返す。frame は補正前の生 BGR フレーム。"""
@@ -224,9 +267,14 @@ class Camera:
             return self._out_size
         if self._cap is None:
             return (self.width, self.height)
-        w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or self.width
-        h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or self.height
-        return (w, h)
+        try:
+            # この属性は配信側のスレッドからも読まれる。読む相手は取得スレッドが
+            # 再接続で差し替え中の cap かもしれないため、失敗しても既定値に落とす
+            w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or self.width
+            h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or self.height
+            return (w, h)
+        except Exception:
+            return (self.width, self.height)
 
     def release(self) -> None:
         if self._cap is not None:

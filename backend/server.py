@@ -74,6 +74,7 @@ async def healthz():
     payload = pipeline.detections_payload()
     return {
         "status": "ok",
+        "camera_status": payload["camera_status"],
         "fps": payload["fps"],
         "frame_id": payload["frame_id"],
         "model": config.MODEL,

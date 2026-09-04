@@ -76,6 +76,18 @@ CAM_WIDTH: int = _int("CAM_WIDTH", 1280)
 CAM_HEIGHT: int = _int("CAM_HEIGHT", 720)
 CAM_FPS: int = _int("CAM_FPS", 30)
 
+# --- カメラ自動再接続 ---
+# 接触不良などでカメラが途中で外れても、再び刺されば自動で再オープンし、
+# 映像と処理を復帰させる。切断中は「再接続中」のプレースホルダーを配信する。
+# 動作の詳細: docs/adr/0035-camera-auto-reconnect.md
+CAM_RECONNECT: bool = _bool("CAM_RECONNECT", True)
+# 連続でこの回数だけ grab() に失敗したら切断とみなして再オープンへ切り替える。
+# 失敗は 10ms 間隔で数えるので、既定 30 回は下限 0.3 秒。失敗1回あたりの所要次第で
+# おおむね 0.3〜1 秒程度で検知する。
+CAM_FAIL_LIMIT: int = _int("CAM_FAIL_LIMIT", 30)
+# 再オープンに失敗したときの再試行間隔(秒)。カメラが戻るまで試し続ける。
+CAM_RETRY_WAIT: float = _float("CAM_RETRY_WAIT", 1.0)
+
 # 取得フレームの向き補正。カメラが逆さに取り付けられているため既定で180°回転。
 #   "180"  : 上下+左右を反転(= 180°回転)。逆さ付けカメラの正しい補正。
 #   "v"    : 上下のみ反転
