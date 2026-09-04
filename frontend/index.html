@@ -203,6 +203,25 @@
   .cg-key { display: inline-block; min-width: 5.6em; opacity: .75; }
   .cg-key::before { content: "◇ "; }
 
+  /* --- カメラ再接続中のオーバーレイ (切断検知中だけ動画の上へ重ねる) ---
+     切断中、サーバ側は黒地に「カメラを再接続しています...」と焼いたプレースホルダー
+     を配信する (理由: docs/adr/0035-camera-auto-reconnect.md)。オーバーレイはその
+     補助で、MJPEG が読めない状態でも状態の文言が必ず見えるようにする。全面の
+     暗幕で下の映像を落とすが、文字は白で固定する(意匠の --c は枠や盤の色であり、
+     異常の報せを読ませる色ではない)。盤や窓と同じく日本語書体(--face)と
+     拡大率(--ui-scale)は意匠から受け取る。 */
+  #reconnect { position: absolute; inset: 0; display: none; pointer-events: none;
+    background: rgba(0, 0, 0, .62); color: #fff; text-align: center;
+    font-family: var(--face);
+    align-items: center; justify-content: center;
+    flex-direction: column; }
+  #reconnect.on { display: flex; animation: e-in .16s ease-out; }
+  .rc-main { font-size: calc(24px * var(--ui-scale)); font-weight: 700;
+    letter-spacing: .12em; }
+  .rc-main::before { content: "◇ "; }
+  .rc-sub { margin-top: 8px; font-size: calc(15px * var(--ui-scale));
+    letter-spacing: .12em; opacity: .85; }
+
   /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
   .box { position: absolute; box-sizing: border-box;
     border: 3px solid var(--c); }
@@ -438,6 +457,12 @@
 <div id="stage">
   <!-- annotate=0: 枠とラベルはこのページ側(#overlay)で描くため、映像には焼き込ませない -->
   <img id="video" src="/video?annotate=0" alt="debug video" />
+  <!-- カメラ再接続中のオーバーレイ。文言は固定なので JS は .on の付け替えだけを
+       行う (理由: docs/adr/0035-camera-auto-reconnect.md) -->
+  <div id="reconnect">
+    <div class="rc-main">カメラを再接続しています...</div>
+    <div class="rc-sub">カメラの接続を確認してください</div>
+  </div>
   <div id="overlay"></div>
   <div id="reticle"></div>
   <!-- モードセレクト。環と見出しだけ置き、円周上の項目は起動時に JS が MODES
@@ -513,6 +538,7 @@
 // 鑑定法/選択/固定はこのページだけで完結させる (理由: docs/adr/0010-client-side-display-policy.md)
 const stage = document.getElementById("stage");
 const video = document.getElementById("video");
+const reconnect = document.getElementById("reconnect");
 const overlay = document.getElementById("overlay");
 const hud = document.getElementById("hud");
 const pState = document.getElementById("p-state");
@@ -1020,9 +1046,38 @@ function setCalibMode(on) {
   );
 }
 
+// /video の MJPEG はサーバの再起動やカメラ再接続に伴う配信の切れ目で死ぬことがある。
+// img の error はストリーム1本につき1度しか上がらないため、死んだら付け直すまで
+// 画面が真っ黒のまま残る。約1秒後に src を付け直して読み込ませ、復帰まで繰り返す。
+// 同じ URL を付け直すとブラウザが再接続しないことがあるため、クエリに時刻を足して
+// 毎回別の URL 扱いにする。
+const VIDEO_SRC = "/video?annotate=0";
+const VIDEO_RETRY_MS = 1000;
+let videoRetryTimer = null;
+let videoBroken = false;   // ストリームが死んだままか。'd' の再表示時に拾い直すかの判定に使う
+function retryVideo() {
+  // 連打でタイマーが積まれないよう、予約が無いときだけ1回予約する。
+  if (videoRetryTimer) return;
+  videoRetryTimer = setTimeout(() => {
+    videoRetryTimer = null;
+    // 'd' で非表示にされている間は試さない。死んだままの印(videoBroken)は残し、
+    // 再表示したときに拾い直す。
+    if (!showVideo) return;
+    videoBroken = false;
+    video.src = `${VIDEO_SRC}&r=${Date.now()}`;
+  }, VIDEO_RETRY_MS);
+}
+video.addEventListener("error", () => {
+  videoBroken = true;
+  retryVideo();
+});
+
 function toggleVideo() {
   showVideo = !showVideo;
   video.style.display = showVideo ? "block" : "none";
+  // 生きているストリームは付け直さない(映像が一瞬途切れるだけの無駄になる)。
+  // 非表示中に切れていたときだけ、再表示に合わせて拾い直す。
+  if (showVideo && videoBroken) retryVideo();
 }
 
 // 矢印で対象を選び替える。選び直した対象は「選択中」であって固定ではない。
@@ -1415,6 +1470,10 @@ function render(payload) {
   pModeName.textContent = MODE_LABEL[mode];
   // 調整モードの案内窓。左上の盤(#panel)ではなく中央の窓へ出す
   calibGuide.classList.toggle("on", calibMode);
+  // カメラ切断検知中は動画の上に再接続中表示を重ねる。サーバは切断中、
+  // 黒地に「再接続中」と焼いたプレースホルダー映像と一緒に camera_status を
+  // "reconnecting" で配信する (理由: docs/adr/0035-camera-auto-reconnect.md)
+  reconnect.classList.toggle("on", payload.camera_status === "reconnecting");
   const msg = Date.now() < toastUntil ? toastText : "";
   pMsg.textContent = msg;
   pMsg.style.display = msg ? "block" : "none";
