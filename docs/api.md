@@ -8,7 +8,7 @@
 | メソッド | パス | 内容 |
 |---|---|---|
 | GET | `/` | フロント(`frontend/index.html`)があれば配信 |
-| GET | `/healthz` | 稼働確認 + 実測fps |
+| GET | `/healthz` | 稼働確認 + 実測fps + カメラの状態 (`camera_status`) |
 | WS | `/ws` | 検出結果JSONを `STREAM_FPS` で配信 (Web/Unity/Android共通の契約) |
 | GET | `/video` | 注釈付きMJPEG (デバッグ確認用。ブラウザで直接開ける)。`?annotate=0` で枠を焼き込まない素の映像 (フロントはこちらを使う) |
 | POST | `/calib` | 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ) |
@@ -18,7 +18,7 @@
 
 `/video` は単体で開く分は既定 (注釈付き) のままでよく、枠が二重になることはありません。
 トップページが `?annotate=0` を使うのは、枠をページ側で描くためです。
-`/healthz` はブラウザで開けば fps などの稼働状況をそのまま読めます。
+`/healthz` はブラウザで開けば fps や `camera_status` などの稼働状況をそのまま読めます。
 
 ## WebSocket の出力フォーマット (クライアント非依存の契約)
 
@@ -31,6 +31,7 @@
   "fps": 14.8,
   "source_size": { "w": 1280, "h": 720 },
   "view": { "zoom": 1.0, "offset_x": 0.0, "offset_y": 0.0 },
+  "camera_status": "ok",
   "detections": [
     {
       "label": "cup", "class_id": 41, "confidence": 0.87,
@@ -46,6 +47,11 @@
   フレーム基準で正規化されるため、クライアント側で補正する必要はありません。
 - `label` は英語([ADR-0003](adr/0003-label-localization.md))、`label_ja` は日本語表示名です。
   辞書(`backend/labels_ja.py`)に無い語は `label_ja` も英語のままになります。
+- `camera_status` はカメラの稼働状態。通常は `"ok"`、切断を検知して再接続を
+  試みている間は `"reconnecting"` になります。切断中は `detections` が空で、
+  `/video` には「カメラを再接続しています...」のプレースホルダー映像が流れます。
+  後から追加したフィールドであり、既存のフィールドは不変のため、旧クライアントも
+  そのまま動きます([ADR-0035](adr/0035-camera-auto-reconnect.md))。
 
 > 表示: ブラウザのオーバーレイ枠と MJPEG映像は、検出名を**日本語・大きめ**で
 > 表示します。MJPEGの日本語描画には日本語フォントが必要で、macOS/Windowsでは
