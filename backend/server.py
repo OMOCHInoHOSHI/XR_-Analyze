@@ -3,6 +3,7 @@
 
 エンドポイント:
   GET  /            -> フロント(frontend/index.html)があれば配信
+  GET  /static/*    -> フロントの静的資源 (style.css / app.js)
   GET  /healthz     -> 稼働確認 + 実測fps
   WS   /ws          -> 検出結果JSONをSTREAM_FPSで配信 (Web/Unity/Android共通の契約)
   GET  /video       -> 注釈付きMJPEG (デバッグ確認用。ブラウザで直接開ける)
@@ -33,6 +34,7 @@ from pathlib import Path
 import cv2
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import calib_store, config, tts
@@ -92,6 +94,11 @@ async def index():
     return JSONResponse(
         {"message": "backend running", "ws": "/ws", "video": "/video", "health": "/healthz"}
     )
+
+
+# フロントの静的資源 (style.css / app.js) の配信。index.html だけは上の / から
+# FileResponse で配るので、ここへ含める必要はない。
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
 class CalibRequest(BaseModel):
