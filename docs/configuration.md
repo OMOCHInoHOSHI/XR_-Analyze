@@ -31,8 +31,9 @@
 | `JP_FONT` | (自動) | MJPEGの日本語描画フォント。自動検出に失敗する時だけ .ttc/.ttf を指定 |
 | `PORT` | 8100 | サーバポート |
 | `OLLAMA_URL` | http://localhost:11434 | AI説明(voice.md「固定した物体の AI 説明」)で呼ぶ Ollama のアドレス |
-| `OLLAMA_MODEL` | gemma4:e4b | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名 |
-| `EXPLAIN_TIMEOUT_SEC` | 30.0 | AI説明の生成完了を待つ上限秒。初回生成は実測約7.5秒 |
+| `OLLAMA_MODEL` | gemma4:e4b-mlx (Apple Silicon) / gemma4:e4b (その他) | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名。Apple Silicon では MLX エンジン版が既定 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
+| `OLLAMA_KEEP_ALIVE` | 30m | 生成後モデルをGPUメモリに残す時間。未ロードからの1回目は実測5〜19秒かかるため長め。`0` で即解放 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
+| `EXPLAIN_TIMEOUT_SEC` | 60.0 | AI説明の生成完了を待つ上限秒。コールド時は実測最大27秒 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `TTS_BACKEND` | voicevox | 鑑定文の読み上げ方式。`voicevox`(VOICEVOX ENGINE) / `say`(macOS同梱コマンド) / `off`(無効) |
 | `VOICEVOX_URL` | http://localhost:50021 | VOICEVOX ENGINE の接続先 |
 | `VOICEVOX_SPEAKER` | 82 | VOICEVOX の話者ID。既定は「青山龍星」のスタイル「不機嫌」。`GET /speakers` で一覧できる |

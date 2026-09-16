@@ -207,9 +207,33 @@ JPEG_QUALITY: int = _int("JPEG_QUALITY", 70)
 # 単体鑑定で固定した物体の説明文をローカルLLM(Ollama)で生成する。
 # モデル選定の経緯: docs/adr/0024-llm-object-explanation.md
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
-# 生成完了を待つ上限秒。初回生成は実機で約7.5秒かかるため20秒以上を推奨。
-EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 30.0)
+
+
+def _default_ollama_model() -> str:
+    """
+    AI説明に使うモデルの既定値。
+
+    Apple Silicon では MLX エンジン版(gemma4:e4b-mlx)を使う。同じ4bit量子化でも
+    prefill が実測で約3倍速く(240→720 tok/s)、ウォーム時の鑑定文が約2秒で返る。
+    ただし `ollama pull gemma4:e4b-mlx` が必要 (実測と経緯:
+    docs/adr/0036-llm-generation-latency.md)。それ以外の環境では llama.cpp 版の
+    gemma4:e4b を使う。
+    """
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        return "gemma4:e4b-mlx"
+    return "gemma4:e4b"
+
+
+OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", _default_ollama_model())
+# 生成後にモデルをGPUメモリへ残す時間。未ロードからの1回目は実測5〜19秒かかり、
+# 既定の5分だと鑑定の間隔が空くたびにこれを払う。30分はYOLO/VOICEVOXと
+# メモリを競合させないための折衷。即解放したい場合は "0" を指定する。
+# 実測と選定理由: docs/adr/0036-llm-generation-latency.md
+OLLAMA_KEEP_ALIVE: str = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+# 生成完了を待つ上限秒。ウォーム時は約2〜10秒、未ロード時は実測で最大27秒
+# かかるため、未ロードでも切れない余裕を見て60秒にする
+# (実測: docs/adr/0036-llm-generation-latency.md)。
+EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 60.0)
 
 # --- 読み上げ (TTS) ---
 # 鑑定文を音声で読み上げる。選択肢は

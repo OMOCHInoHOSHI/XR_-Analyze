@@ -6,17 +6,22 @@
 ## 固定した物体の AI 説明 (ローカルLLM)
 
 単体鑑定で `Enter` により鑑定を**固定**すると、画面中央に**説明ウィンドウ**が開き、
-対象の**鑑定文**が日本語で表示されます。鑑定文はローカルLLM (Ollama / `gemma4:e4b`) が
-検出ラベルから 2〜3 文で生成します (モデル・人物像の選定経緯:
-[ADR-0024](adr/0024-llm-object-explanation.md))。
+対象の**鑑定文**が日本語で表示されます。鑑定文はローカルLLM (Ollama。Apple Silicon
+では MLX 版 `gemma4:e4b-mlx`、その他は `gemma4:e4b`) が検出ラベルから 2〜3 文で
+生成します (モデル・人物像の選定経緯:
+[ADR-0024](adr/0024-llm-object-explanation.md) / 速度改善:
+[ADR-0036](adr/0036-llm-generation-latency.md))。
 
 異世界アニメの「鑑定」がモチーフのため、鑑定文は**異世界の無口な職人鑑定士**の
 口調になります。傘や剣など昔から存在する道具は素直に鑑定されますが、PC や携帯など
 この世界に存在しない科学技術の産物は「古代文明の遺物」「謎の物体」として、
 正体を直接明かされないまま観察と推測だけで語られます。
 
-- 初回は生成に**数秒**かかります(ウィンドウには「鑑定中…」と出ます)。以後、
-  同じラベルはキャッシュから即座に表示されます。
+- 初回は生成に数秒かかります(ウィンドウには「鑑定中…」と出ます)。以後、
+  同じラベルはキャッシュから即座に表示されます。モデルは30分メモリに残るため
+  (keep_alive)、使い続けている間の生成は実測約2秒です。30分以上放置した後の
+  1回目だけ、モデルのロードで5〜19秒余分にかかります
+  ([ADR-0036](adr/0036-llm-generation-latency.md))。
 - ウィンドウが出ている間は `Enter` / `Esc` が「ウィンドウを閉じる」に専任になり、
   固定や選択は解除されません。ウィンドウを閉じても固定は続きます。
 - 対象を見失うなどして固定が外れると、ウィンドウも一緒に閉じます。
@@ -25,13 +30,16 @@
 セットアップ (事前に一度だけ):
 
 ```bash
-brew install --cask ollama   # Ollama のインストール (Mac)
-ollama pull gemma4:e4b       # 鑑定文を生成するモデル
-ollama serve                 # 起動 (http://localhost:11434)
+brew install --cask ollama      # Ollama のインストール (Mac)
+ollama pull gemma4:e4b-mlx      # 鑑定文を生成するモデル (Apple Silicon の既定)
+ollama serve                    # 起動 (http://localhost:11434)
 ```
 
-`OLLAMA_URL` / `OLLAMA_MODEL` / `EXPLAIN_TIMEOUT_SEC` の3つの環境変数で上書き
-できます(configuration.md「設定 (環境変数で上書き)」参照)。鑑定文は検出ラベルのみから生成する
+Intel Mac や Windows など MLX が動かない環境では `ollama pull gemma4:e4b` を
+使ってください。既定モデルは環境に応じて自動で切り替わります。
+
+`OLLAMA_URL` / `OLLAMA_MODEL` / `OLLAMA_KEEP_ALIVE` / `EXPLAIN_TIMEOUT_SEC` の
+4つの環境変数で上書きできます(configuration.md「設定 (環境変数で上書き)」参照)。鑑定文は検出ラベルのみから生成する
 ため、画角に見えている個体の特徴(色・状態など)は含まれません。
 
 鑑定文は表示と同時に音声でも読み上げられます。既定はキャラクター性のある声を
