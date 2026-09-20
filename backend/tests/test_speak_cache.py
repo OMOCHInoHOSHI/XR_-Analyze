@@ -49,6 +49,11 @@ def test_path_for_sanitizes_unsafe_chars(cache_dir):
     assert path.suffix == ".wav"
 
 
+def test_path_for_ignores_surrounding_whitespace(cache_dir):
+    """前後の空白だけが違う本文は同じファイルに落ちる(/speak の照合を取り逃がさない)。"""
+    assert speak_cache.path_for("cup", "本文。") == speak_cache.path_for("cup", "  本文。\n")
+
+
 def test_path_for_truncates_long_label(cache_dir):
     label = "x" * 100
     path = speak_cache.path_for(label, "本文")

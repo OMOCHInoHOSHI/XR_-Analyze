@@ -42,7 +42,10 @@ def path_for(label: str, text: str) -> Path:
     念のため純粋な計算に留めている)。
     """
     safe_label = _UNSAFE_CHARS_RE.sub("_", label)[:_LABEL_MAX_LEN]
-    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
+    # 本文は strip してから hash する。保存側(先読み・退避路)は strip 済みの本文を
+    # 渡すが、/speak の照合はフロントから来た本文をそのまま渡すため、前後の空白の
+    # 有無で別ファイル扱いになってキャッシュを取り逃がすのを防ぐ。
+    digest = hashlib.sha1(text.strip().encode("utf-8")).hexdigest()[:10]
     base = _cache_dir() or Path(".")
     return base / f"{safe_label}-{digest}.wav"
 
