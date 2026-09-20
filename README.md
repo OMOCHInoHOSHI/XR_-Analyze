@@ -58,4 +58,6 @@ python3 -m backend.server
 | `d` | デバッグ映像のON/OFF |
 
 各モードの詳しい振る舞い・鑑定盤の見方・枠の意匠切り替えは
-[docs/usage.md](docs/usage.md) を参照してください。
+[docs/usage.md](docs/usage.md) を参照してください。鑑定文は事前生成してディスクに
+永続化でき(`python3 -m backend.precompute_explain`)、詳細は
+[docs/voice.md](docs/voice.md) を参照してください。

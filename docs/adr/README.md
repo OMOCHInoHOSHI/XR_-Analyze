@@ -51,6 +51,7 @@
 | [0033](0033-readout-wait-is-shown.md) | 読み上げの待ちは本文の下に帯で示す | `frontend/index.html` |
 | [0034](0034-streams-close-themselves.md) | 終了の合図でストリームを自分から閉じる | `server.py` |
 | [0035](0035-camera-auto-reconnect.md) | カメラ切断を検知して自動で再接続する | `pipeline.py` / `camera.py` / `frontend/index.html` |
+| [0038](0038-explain-persistent-cache.md) | 鑑定文キャッシュをディスクに永続化し、事前生成する | `explain.py` / `server.py` / `precompute_explain.py` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は

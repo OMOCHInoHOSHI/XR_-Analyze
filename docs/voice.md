@@ -38,9 +38,21 @@ ollama serve                    # 起動 (http://localhost:11434)
 Intel Mac や Windows など MLX が動かない環境では `ollama pull gemma4:e4b` を
 使ってください。既定モデルは環境に応じて自動で切り替わります。
 
-`OLLAMA_URL` / `OLLAMA_MODEL` / `OLLAMA_KEEP_ALIVE` / `EXPLAIN_TIMEOUT_SEC` の
-4つの環境変数で上書きできます(configuration.md「設定 (環境変数で上書き)」参照)。鑑定文は検出ラベルのみから生成する
+`OLLAMA_URL` / `OLLAMA_MODEL` / `OLLAMA_KEEP_ALIVE` / `EXPLAIN_TIMEOUT_SEC` /
+`EXPLAIN_CACHE_PATH` の環境変数で上書きできます(configuration.md「設定
+(環境変数で上書き)」参照)。鑑定文は検出ラベルのみから生成する
 ため、画角に見えている個体の特徴(色・状態など)は含まれません。
+
+(任意) 検出語彙(COCO 80、または LVIS 1203)の鑑定文をあらかじめまとめて
+生成しておくと、初めて見るラベル以外は待ち時間なしで表示されます
+([ADR-0038](adr/0038-explain-persistent-cache.md))。Ollama を起動した状態で
+実行してください(ウォーム時1件あたり実測約2秒かかるため、LVISまで含めると
+それなりに時間がかかります)。
+
+```bash
+python3 -m backend.precompute_explain          # COCO 80
+python3 -m backend.precompute_explain --lvis    # COCO 80 + LVIS 1203
+```
 
 鑑定文は表示と同時に音声でも読み上げられます。既定はキャラクター性のある声を
 出せる **VOICEVOX ENGINE** です(声の選定経緯は

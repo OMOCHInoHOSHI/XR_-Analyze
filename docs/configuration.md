@@ -34,6 +34,7 @@
 | `OLLAMA_MODEL` | gemma4:e4b-mlx (Apple Silicon) / gemma4:e4b (その他) | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名。Apple Silicon では MLX エンジン版が既定 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `OLLAMA_KEEP_ALIVE` | 30m | 生成後モデルをGPUメモリに残す時間。未ロードからの1回目は実測5〜19秒かかるため長め。`0` で即解放 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `EXPLAIN_TIMEOUT_SEC` | 60.0 | AI説明の生成完了を待つ上限秒。コールド時は実測最大27秒 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
+| `EXPLAIN_CACHE_PATH` | ./explain_cache.json | 鑑定文の永続キャッシュ保存先。起動時に読み込み、新規生成のたびに書き戻す。空文字でプロセス内キャッシュのみに戻す ([ADR-0038](adr/0038-explain-persistent-cache.md)) |
 | `TTS_BACKEND` | voicevox | 鑑定文の読み上げ方式。`voicevox`(VOICEVOX ENGINE) / `say`(macOS同梱コマンド) / `off`(無効) |
 | `VOICEVOX_URL` | http://localhost:50021 | VOICEVOX ENGINE の接続先 |
 | `VOICEVOX_SPEAKER` | 82 | VOICEVOX の話者ID。既定は「青山龍星」のスタイル「不機嫌」。`GET /speakers` で一覧できる |
