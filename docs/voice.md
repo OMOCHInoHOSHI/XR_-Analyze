@@ -43,16 +43,20 @@ Intel Mac や Windows など MLX が動かない環境では `ollama pull gemma4
 (環境変数で上書き)」参照)。鑑定文は検出ラベルのみから生成する
 ため、画角に見えている個体の特徴(色・状態など)は含まれません。
 
-(任意) 検出語彙(COCO 80、または LVIS 1203)の鑑定文をあらかじめまとめて
-生成しておくと、初めて見るラベル以外は待ち時間なしで表示されます
-([ADR-0038](adr/0038-explain-persistent-cache.md))。Ollama を起動した状態で
-実行してください(ウォーム時1件あたり実測約2秒かかるため、LVISまで含めると
-それなりに時間がかかります)。
+(任意) 検出語彙の鑑定文をあらかじめまとめて生成しておくと、初めて見るラベル
+以外は待ち時間なしで表示されます([ADR-0038](adr/0038-explain-persistent-cache.md))。
+対象は「サーバと同じ設定(`MODEL` / `CLASSES` / `VOCAB`)で実際に配信される
+ラベル」なので、**サーバを起動するときと同じ環境変数を付けて**実行してください。
+Ollama を起動した状態で、1件あたり 2〜6秒(機械の状態で振れます)かかります。
 
 ```bash
-python3 -m backend.precompute_explain          # COCO 80
-python3 -m backend.precompute_explain --lvis    # COCO 80 + LVIS 1203
+MODEL=yoloe-11l-seg-pf.pt python3 -m backend.precompute_explain   # YOLOE-pf なら 1054 語
+python3 -m backend.precompute_explain --labels my_labels.txt       # 1行1ラベルで対象を指定
 ```
+
+同梱の `explain_cache.json` には YOLOE-pf(`VOCAB=auto`)の 1054 語に加え、COCO 80 と
+LVIS の見出し語で生成した分も入っています(実行時に出ないラベルが混じっていても
+害はありません)。
 
 鑑定文は表示と同時に音声でも読み上げられます。既定はキャラクター性のある声を
 出せる **VOICEVOX ENGINE** です(声の選定経緯は
@@ -85,12 +89,16 @@ macOS 同梱の `say` コマンドで読み上げることもできます(`TTS_V
 初回の合成待ち(1件5〜10秒)を無くしたい場合は、事前にまとめて合成しておけます。
 
 ```bash
-python3 -m backend.precompute_speak                    # explain_cache.json の全件
-python3 -m backend.precompute_speak --labels labels.txt # 対象ラベルを絞る(1行1ラベル)
-python3 -m backend.precompute_speak --force             # 既存のキャッシュも作り直す
+MODEL=yoloe-11l-seg-pf.pt python3 -m backend.precompute_speak   # 設定中のモデルが出す全ラベル
+python3 -m backend.precompute_speak --labels labels.txt          # 対象ラベルを指定(1行1ラベル)
+python3 -m backend.precompute_speak --all                        # explain_cache.json の全件
+python3 -m backend.precompute_speak --force                      # 既存のキャッシュも作り直す
 ```
 
-1件の合成は 5〜10秒、COCO 80件で 63MB ほどです(実測: 平均 719KB、音声長 15秒)。
+対象の既定は `precompute_explain` と同じ「設定中のモデルが実際に出すラベル」です。
+
+1件の合成は 5〜10秒、1件あたり 0.7MB ほどです(実測: 平均 719KB、音声長 15秒。
+YOLOE-pf の 1054 語で約 0.75GB)。
 鑑定文の事前生成(Ollama)と同時に走らせると合成が 20〜40秒まで伸び、既定の
 `TTS_TIMEOUT_SEC`(20秒)を超えて中断することがあります。その場合は
 `TTS_TIMEOUT_SEC=120 python3 -m backend.precompute_speak` のように伸ばして
