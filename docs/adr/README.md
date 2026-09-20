@@ -55,6 +55,7 @@
 | [0037](0037-branch-specific-prompt-rejected.md) | 分岐別プロンプトは採用しない (出力長が変わらないため) | — |
 | [0038](0038-explain-persistent-cache.md) | 鑑定文キャッシュをディスクに永続化し、事前生成する | `explain.py` / `server.py` / `precompute_explain.py` |
 | [0039](0039-speak-persistent-cache.md) | 読み上げ音声をディスクへ永続化する | `speak_cache.py` / `server.py` / `precompute_speak.py` / `config.py` |
+| [0040](0040-default-model-yoloe.md) | 既定の検出モデルを YOLOE-pf (yoloe-11l-seg-pf.pt) にする | `config.py` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は

@@ -18,7 +18,7 @@
 | `CAM_FAIL_LIMIT` | 30 | `grab()` の連続失敗を何回数えたら切断とみなすか。失敗は10ms間隔で数えるため、既定30回は下限0.3秒・おおむね0.3〜1秒程度 |
 | `CAM_RETRY_WAIT` | 1.0 | 再オープンに失敗したときの再試行間隔(秒)。カメラが戻るまで試し続ける |
 | `CALIB_FILE` | ./calib.json | 合わせ込み値(ズーム/位置)の保存先。ブラウザで `s` を押すと書き込まれ、次回起動時に自動で読まれる |
-| `MODEL` | yolov8n.pt | 検出モデル。detection.md「認識できる物体を増やす」参照 |
+| `MODEL` | yoloe-11l-seg-pf.pt | 検出モデル。detection.md「認識できる物体を増やす」参照。既定の経緯は [ADR-0040](adr/0040-default-model-yoloe.md) |
 | `CLASSES` | (未指定) | オープン語彙モデルで検出する物体名(カンマ区切り)。例: `wallet,watch,ring` |
 | `MAX_DET` | 15 | 一度に表示する検出数の上限(信頼度上位N件)。0以下で無制限 |
 | `CONF_THRES` | 0.35 | 信頼度しきい値 |

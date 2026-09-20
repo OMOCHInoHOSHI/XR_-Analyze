@@ -118,14 +118,16 @@ if _SAVED_VIEW:
 
 # --- 検出モデル ---
 # 認識できる物体の種類はモデルで決まる:
-#   - yolov8n.pt 等(既定)        : COCO 80カテゴリ。最軽量・最速。
-#   - yoloe-11s-seg-pf.pt 等       : オープン語彙「プロンプトフリー」。LVIS等1200+の
+#   - yoloe-11l-seg-pf.pt (既定)   : オープン語彙「プロンプトフリー」。LVIS等1200+の
 #                                    語彙で、クラス指定なしに見えたモノへ名前を付ける。
-#                                    「専門性不要・モノの名前が分かればいい」用途に最適。
+#                                    鑑定の対象を限定しない用途に合う。s/m は同じ語彙の
+#                                    小型版で、速度優先ならそちら。
 #   - yoloe-11s-seg.pt + CLASSES   : テキスト指定モード。CLASSESで挙げた任意の物体だけ
 #                                    を検出(例: CLASSES="wallet,watch,ring")。
+#   - yolov8n.pt 等                : COCO 80カテゴリ。最軽量・最速だが語彙が狭い。
+# 既定を YOLOE-pf にした理由: docs/adr/0040-default-model-yoloe.md
 # モデル(.pt)は初回に自動ダウンロードされる。
-MODEL: str = os.environ.get("MODEL", "yolov8n.pt")
+MODEL: str = os.environ.get("MODEL", "yoloe-11l-seg-pf.pt")
 
 # オープン語彙(YOLOE/YOLO-World)用: 検出したいクラス名をカンマ区切りで指定。
 # 指定すると set_classes() でそのクラスだけに絞る。空なら未使用

@@ -83,10 +83,10 @@ XR グラスに映す 1 枚の画面が目的であり、画面遷移も状態�
 
 | ファイル | サイズ | 語彙 | 用途 |
 |---|---|---|---|
-| `yolov8n.pt` | 6.2MB | COCO 80カテゴリ | 既定。最軽量・最速 |
-| `yoloe-11s-seg-pf.pt` | 27MB | LVIS 1200+ | オープン語彙・速度優先 |
+| `yoloe-11l-seg-pf.pt` | 71MB | LVIS 1200+ | **既定**。精度優先。実機で常用 ([ADR-0040](adr/0040-default-model-yoloe.md)) |
 | `yoloe-11m-seg-pf.pt` | 61MB | LVIS 1200+ | 中間 |
-| `yoloe-11l-seg-pf.pt` | 71MB | LVIS 1200+ | 精度優先。実機で常用 |
+| `yoloe-11s-seg-pf.pt` | 27MB | LVIS 1200+ | オープン語彙・速度優先 |
+| `yolov8n.pt` | 6.2MB | COCO 80カテゴリ | 最軽量・最速。語彙が狭い |
 
 プロンプトフリーの語彙 4585 語のうち、物体でない語を除いた 1054 語に絞って使う
 ([ADR-0018](adr/0018-vocabulary-restriction.md))。切り替え方は
