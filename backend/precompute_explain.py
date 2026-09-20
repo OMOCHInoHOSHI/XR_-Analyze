@@ -57,6 +57,8 @@ def _collect_labels(args: argparse.Namespace) -> list[str]:
 
 
 def main() -> None:
+    # ログへリダイレクトしても進捗が逐次見えるよう行バッファにする
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(
         description="鑑定文をラベルごとに事前生成し、EXPLAIN_CACHE_PATH へ永続化する"
     )

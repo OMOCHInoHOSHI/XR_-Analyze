@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import threading
 from pathlib import Path
 
 from . import config
@@ -80,7 +81,10 @@ def store(label: str, text: str, data: bytes) -> None:
     path = path_for(label, text)
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
+        # 一時ファイル名にスレッドIDを混ぜる。同じ label+本文を /speak の退避路と
+        # 先読みの締めが同時に保存しようとすると、固定名では片方の os.replace が
+        # 先に消された tmp を掴んで FileNotFoundError になるため。
+        tmp = path.with_name(f"{path.name}.{os.getpid()}-{threading.get_ident()}.tmp")
         tmp.write_bytes(data)
         os.replace(tmp, path)
     except OSError as e:
