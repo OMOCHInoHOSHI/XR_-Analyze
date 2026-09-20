@@ -33,6 +33,10 @@ from . import config, vocab
 from .explain import ExplainEmpty, ExplainUnavailable, generate, load_cache, save_cache
 from .labels_ja import to_ja
 
+# 一過性の失敗に対する再試行回数と待ち秒
+RETRIES = 2
+RETRY_WAIT_SEC = 5.0
+
 
 def _collect_labels(args: argparse.Namespace) -> list[str]:
     """
@@ -82,9 +86,19 @@ def main() -> None:
         ja = to_ja(label)
         start = time.time()
         try:
-            text = generate(label, ja, on_sentence=None)
+            text = None
+            # 一過性の失敗(タイムアウト等)で数時間のバッチを止めないよう再試行する
+            for attempt in range(1, RETRIES + 2):
+                try:
+                    text = generate(label, ja, on_sentence=None)
+                    break
+                except ExplainUnavailable as e:
+                    if attempt > RETRIES:
+                        raise
+                    print(f"  [retry {attempt}/{RETRIES}] {label}: {e}")
+                    time.sleep(RETRY_WAIT_SEC)
         except ExplainUnavailable as e:
-            # Ollama に繋がらない状態で残りを回しても無駄なので、ここで打ち切る。
+            # 再試行しても繋がらないなら Ollama が落ちているので、ここで打ち切る。
             # ここまでの生成分は既にファイルへ保存済み(1件ごとに保存するため)。
             print(f"[precompute] 中断: {e}")
             print("[precompute] Ollama を起動してから再実行してください (ollama serve)")

@@ -13,6 +13,7 @@ docs/adr/0026-voicevox-character-voice.md
 from __future__ import annotations
 
 import io
+import http.client
 import json
 import subprocess
 import tempfile
@@ -107,8 +108,13 @@ def _voicevox(text: str) -> bytes:
     try:
         with urllib.request.urlopen(query_req, timeout=config.TTS_TIMEOUT_SEC) as resp:
             audio_query = json.loads(resp.read())
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-        # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける
+    except (
+        urllib.error.URLError, TimeoutError, http.client.HTTPException, json.JSONDecodeError,
+    ) as e:
+        # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける。
+        # HTTPException は接続後に応答が壊れた場合(BadStatusLine / RemoteDisconnected /
+        # IncompleteRead)。ENGINE が長時間の連続合成中に一度だけ空応答を返す事象を
+        # 実測しており、これを逃すと /speak が 500 に、事前合成が例外で落ちる
         raise TTSUnavailable(
             "音声合成エンジン (VOICEVOX) に接続できません。起動を確認してください"
         ) from e
@@ -128,7 +134,7 @@ def _voicevox(text: str) -> bytes:
     try:
         with urllib.request.urlopen(synth_req, timeout=config.TTS_TIMEOUT_SEC) as resp:
             data = resp.read()
-    except (urllib.error.URLError, TimeoutError) as e:
+    except (urllib.error.URLError, TimeoutError, http.client.HTTPException) as e:
         raise TTSUnavailable(
             "音声合成エンジン (VOICEVOX) に接続できません。起動を確認してください"
         ) from e

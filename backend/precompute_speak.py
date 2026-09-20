@@ -42,6 +42,9 @@ from . import config, speak_cache, tts, vocab
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EXPLAIN_JSON = os.path.join(ROOT, "explain_cache.json")
+# 一過性の失敗(壊れた応答・タイムアウト)に対する再試行回数と待ち秒
+RETRIES = 2
+RETRY_WAIT_SEC = 5.0
 
 
 def _load_explain_cache(path: str) -> dict[str, str]:
@@ -124,13 +127,22 @@ def main() -> None:
             continue
 
         start = time.time()
-        try:
-            data = tts.synthesize(text)
-        except tts.TTSUnavailable as e:
-            raise SystemExit(
-                f"音声合成エンジンに接続できません: {e}\n"
-                "VOICEVOX ENGINE (または対応アプリ) を起動してから再実行してください。"
-            )
+        data = None
+        # ENGINE は数百件の連続合成中に一度だけ壊れた応答を返すことがある(実測)。
+        # 1件の失敗で数時間のバッチを止めないよう、短い間を置いて再試行し、
+        # それでも駄目なら ENGINE が落ちたとみなして中断する。
+        for attempt in range(1, RETRIES + 2):
+            try:
+                data = tts.synthesize(text)
+                break
+            except tts.TTSUnavailable as e:
+                if attempt > RETRIES:
+                    raise SystemExit(
+                        f"音声合成エンジンに接続できません: {e}\n"
+                        "VOICEVOX ENGINE (または対応アプリ) を起動してから再実行してください。"
+                    )
+                print(f"  [retry {attempt}/{RETRIES}] {label}: {e}")
+                time.sleep(RETRY_WAIT_SEC)
         elapsed = time.time() - start
         speak_cache.store(label, text, data)
 
