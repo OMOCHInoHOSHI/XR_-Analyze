@@ -22,6 +22,7 @@ explain_cache.json) へ永続化する。サーバはこのファイルを起動
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 
 from . import config
