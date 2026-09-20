@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calib_store, config, tts
+from . import calib_store, config, speak_cache, tts
 # モジュール名を明示的に別名にするのは、下の /explain ハンドラ関数名が
 # `explain` で、モジュール名とかぶるため(ハンドラ定義でグローバルの
 # `explain` がハンドラ関数自身に上書きされてしまう)。
@@ -209,11 +209,14 @@ _speak_parts: dict[str, list[bytes]] = {}
 # label -> ここまでの断片合成がすべて成功しているか(1つでも失敗したら False)。
 _speak_ok: dict[str, bool] = {}
 
-# 合成タスクのキュー。要素は (label, 文) で、文が None ならそのラベルの
-# 文がすべて出そろったことを示す「締め」の合図。
+# 合成タスクのキュー。要素は (label, 文, 締めの全文) の3つ組。
+#   - 文の合成: (label, 文, None)
+#   - 締めの合図: (label, None, 全文)  文が出そろったラベルの確定した本文を運ぶ。
+#     ディスクキャッシュ (speak_cache) は本文のハッシュをキーに含むため、
+#     ワーカー自身は本文を持たず、締めの合図に載せてもらう必要がある。
 # 単一のワーカースレッドが順番に処理するため、同じラベルの文が並行合成されて
 # 順序が狂うことはない。
-_speak_queue: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
+_speak_queue: "queue.Queue[tuple[str, str | None, str | None]]" = queue.Queue()
 
 # _speak_cache / _speak_jobs / _speak_parts / _speak_ok はメインスレッド(FastAPIの
 # スレッドプール)とワーカースレッドの双方から触るため、変更はこのロックの下で行う。
@@ -249,19 +252,27 @@ def _enqueue_speak_sentence(label: str, sentence: str) -> None:
             _speak_jobs[label] = threading.Event()
             _trim_speak_jobs()
         _speak_ok.setdefault(label, True)
-    _speak_queue.put((label, sentence))
+    _speak_queue.put((label, sentence, None))
 
 
-def _finalize_speak_job(label: str) -> None:
-    """ラベルの文がすべて出そろったことをワーカーへ知らせる(締めの合図)。"""
-    _speak_queue.put((label, None))
+def _finalize_speak_job(label: str, text: str = "") -> None:
+    """
+    ラベルの文がすべて出そろったことをワーカーへ知らせる(締めの合図)。
+
+    text は確定した鑑定文の全文。ディスクキャッシュへの保存に使うため、
+    合成結果とセットで持たせる。呼び出し側で全文が確定していない
+    (= 例外で打ち切られた)場合は空文字のままでよく、その場合ワーカーは
+    ディスクへ保存しない。
+    """
+    _speak_queue.put((label, None, text))
 
 
 def _speak_worker() -> None:
     """
-    先読み合成の専任スレッド。キューから (label, 文) を1件ずつ取り出し、
-    順番に合成する。文が None のときは「締め」の合図で、それまでに合成できた
-    断片を結合して _speak_cache へ格納し、待っている /speak を起こす。
+    先読み合成の専任スレッド。キューから (label, 文, 締めの全文) を1件ずつ
+    取り出し、順番に合成する。文が None のときは「締め」の合図で、それまでに
+    合成できた断片を結合して _speak_cache へ格納し(あわせてディスクキャッシュ
+    speak_cache へも保存し)、待っている /speak を起こす。
 
     tts.TTSUnavailable に加え、concat_wav が壊れた断片に対して投げうる
     wave.Error/EOFError など想定外の例外もすべてここで受け止める。ここで
@@ -270,7 +281,7 @@ def _speak_worker() -> None:
     落ちる劣化状態がプロセス終了まで続いてしまうため。
     """
     while True:
-        label, sentence = _speak_queue.get()
+        label, sentence, full_text = _speak_queue.get()
         try:
             if sentence is None:
                 parts = _speak_parts.pop(label, [])
@@ -281,6 +292,12 @@ def _speak_worker() -> None:
                         with _speak_lock:
                             _speak_cache[label] = data
                             _trim_speak_cache()
+                        # 本文が確定している(= 正常終了)場合だけディスクへ保存する。
+                        # 例外で打ち切られた場合は full_text が空文字のままなので
+                        # store は no-op 相当(speak_cache.store 自体は空文字でも
+                        # 動くが、意図的に「本文とずれた保存」を避けるため呼ばない)。
+                        if full_text:
+                            speak_cache.store(label, full_text, data)
                     except Exception as e:
                         print(f"[speak] 先読み結果の結合に失敗しました ({label}): {e}")
                 with _speak_lock:
@@ -328,6 +345,7 @@ def _explain_and_prefetch_speech(label: str, ja: str | None) -> str:
     ただし合成は別スレッドで進むため、この関数(ひいては /explain)を遅らせることはない。
     """
     job_started = False  # 先読みジョブを1文でも積んだか(締めの合図が要るか)
+    text = ""            # 確定した全文。正常終了時のみ埋まる(締めの合図に載せる)
 
     def on_sentence(sentence: str) -> None:
         nonlocal job_started
@@ -335,12 +353,14 @@ def _explain_and_prefetch_speech(label: str, ja: str | None) -> str:
         job_started = True
 
     try:
-        return explain_mod.generate(label, ja, on_sentence=on_sentence)
+        text = explain_mod.generate(label, ja, on_sentence=on_sentence)
+        return text
     finally:
         # 1文でも積んだなら、合成は別スレッドで進む。締めの合図を必ず送り、
-        # 待っている /speak の Event が固まらないようにする。
+        # 待っている /speak の Event が固まらないようにする。text を渡すと
+        # ワーカー側で結合後にディスクキャッシュへも保存する(空文字なら保存しない)。
         if job_started:
-            _finalize_speak_job(label)
+            _finalize_speak_job(label, text)
 
 
 @app.post("/explain")
@@ -395,14 +415,28 @@ def speak(req: SpeakRequest):
     合成は VOICEVOX ENGINE / macOS の say コマンドで行う(実装: backend/tts.py)。
     /explain のストリーミング中に文ごとの先読み合成(_speak_jobs)が進んでいれば
     その完了を待ってから返す。先読みが無い(または間に合わなかった)場合は、
-    現状どおりその場で同期合成する(退避路)。同一ラベルはキャッシュを返し、
-    再合成はしない。
+    現状どおりその場で同期合成する(退避路)。同一ラベルはメモリキャッシュを
+    返し、再合成はしない。
+
+    メモリキャッシュ(プロセス再起動で消える)にも無ければ、ディスクの永続
+    キャッシュ(backend/speak_cache.py)を試す。本文のハッシュも一致していれば
+    合成をスキップしてそのまま返せる(理由: docs/adr/0039-speak-persistent-cache.md)。
+    退避路・先読みで新たに合成した結果はディスクにも書き、次回以降に備える。
     """
     with _speak_lock:
         cached = _speak_cache.get(req.label)
         if cached is not None:
             _speak_cache.move_to_end(req.label)
             return Response(content=cached, media_type="audio/wav")
+
+    disk_cached = speak_cache.load(req.label, req.text)
+    if disk_cached is not None:
+        with _speak_lock:
+            _speak_cache[req.label] = disk_cached
+            _trim_speak_cache()
+        return Response(content=disk_cached, media_type="audio/wav")
+
+    with _speak_lock:
         job = _speak_jobs.get(req.label)
 
     if job is not None:
@@ -425,6 +459,7 @@ def speak(req: SpeakRequest):
     with _speak_lock:
         _speak_cache[req.label] = data
         _trim_speak_cache()
+    speak_cache.store(req.label, text, data)
     return Response(content=data, media_type="audio/wav")
 
 
