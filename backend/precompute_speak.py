@@ -12,11 +12,15 @@
      {label: text} 形式) を既定で読む。
   2) VOICEVOX ENGINE を起動しておく(TTS_BACKEND=voicevox が既定)。
   3) 実行:
-       python3 -m backend.precompute_speak
-     対象を絞る場合:
-       python3 -m backend.precompute_speak --labels labels.txt
+       python3 -m backend.precompute_speak            # 設定中のモデルが出す全ラベル
+     対象を絞る/広げる場合:
+       python3 -m backend.precompute_speak --labels labels.txt   # 1行1ラベル
+       python3 -m backend.precompute_speak --all                 # explain-json の全件
      既存ファイルも合成し直す場合:
        python3 -m backend.precompute_speak --force
+     既定の対象は precompute_explain と同じく、サーバと同じ設定 (MODEL / CLASSES /
+     VOCAB) で実際に配信されるラベル (backend/vocab.py の runtime_labels)。
+     サーバを動かすときと同じ環境変数を付けて実行する。
 
 特徴:
   - 既に speak_cache.path_for の場所にファイルがあればスキップ(--force で再合成)。
@@ -34,7 +38,7 @@ import time
 import wave
 from io import BytesIO
 
-from . import speak_cache, tts
+from . import config, speak_cache, tts, vocab
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_EXPLAIN_JSON = os.path.join(ROOT, "explain_cache.json")
@@ -75,7 +79,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--labels", default=None,
-        help="対象ラベルを絞る1行1ラベルのファイル(未指定なら explain-json の全件)",
+        help="対象ラベルの1行1ラベルのファイル(未指定なら設定中のモデルが出す全ラベル)",
+    )
+    parser.add_argument(
+        "--all", action="store_true",
+        help="explain-json にある全件を対象にする(モデルを読み込まない)",
     )
     parser.add_argument(
         "--force", action="store_true",
@@ -84,7 +92,13 @@ def main() -> None:
     args = parser.parse_args()
 
     explain_cache = _load_explain_cache(args.explain_json)
-    labels = _load_labels(args.labels) if args.labels else list(explain_cache.keys())
+    if args.labels:
+        labels = _load_labels(args.labels)
+    elif args.all:
+        labels = list(explain_cache.keys())
+    else:
+        print(f"[precompute_speak] モデル {config.MODEL} の語彙を読み込み中 (VOCAB={config.VOCAB})")
+        labels = vocab.runtime_labels()
 
     targets: list[tuple[str, str]] = []
     missing: list[str] = []

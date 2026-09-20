@@ -5,14 +5,18 @@ explain_cache.json) へ永続化する。サーバはこのファイルを起動
 (理由: docs/adr/0038-explain-persistent-cache.md)。
 
 使い方:
-  python3 -m backend.precompute_explain             # COCO 80 語彙
-  python3 -m backend.precompute_explain --lvis       # COCO 80 + LVIS 1203
+  python3 -m backend.precompute_explain                 # 設定中のモデルが出す全ラベル
   python3 -m backend.precompute_explain --labels a.txt  # 1行1ラベルのファイルを対象にする
-  python3 -m backend.precompute_explain --force      # 既存キャッシュのラベルも生成し直す
+  python3 -m backend.precompute_explain --force         # 既存キャッシュのラベルも生成し直す
 
-事前に Ollama を起動しておくこと (`ollama serve`)。1件あたりウォーム時で
-実測約2秒かかるため、COCO 80件でも数分、LVIS 1203件では相応の時間がかかる
-見込み (実測: docs/adr/0036-llm-generation-latency.md)。
+対象は既定で「サーバと同じ設定 (MODEL / CLASSES / VOCAB) で実際に配信されるラベル」
+(backend/vocab.py の runtime_labels)。サーバを動かすときと同じ環境変数を付けて
+実行する (例: MODEL=yoloe-11l-seg-pf.pt)。モデル語彙の名前がそのままキーになる
+ので、対訳辞書の見出し語で作るのと違い、キャッシュを取り逃がさない。
+
+事前に Ollama を起動しておくこと (`ollama serve`)。1件あたり実測 2〜6秒
+(機械の状態で振れる) かかるため、1000語級では 1〜2時間見込む
+(実測: docs/adr/0037-branch-specific-prompt-rejected.md)。
 
 特徴 (backend/build_ja_dict.py の構造に倣う):
   - 途中保存・再開対応。1件生成するたびに EXPLAIN_CACHE_PATH を上書き保存する
@@ -25,36 +29,23 @@ import argparse
 import sys
 import time
 
-from . import config
+from . import config, vocab
 from .explain import ExplainEmpty, ExplainUnavailable, generate, load_cache, save_cache
-from .labels_ja import COCO_JA, to_ja
-
-try:
-    from .labels_ja_lvis import LVIS_JA
-except Exception:
-    LVIS_JA = {}
+from .labels_ja import to_ja
 
 
 def _collect_labels(args: argparse.Namespace) -> list[str]:
     """
     引数から対象ラベルの一覧を作る。
 
-    --labels が指定された場合はそのファイルの内容だけを対象にする(COCO/LVISは
-    使わない)。指定が無ければ既定の COCO 80 を土台にし、--lvis が付いていれば
-    LVIS 1203 を追加する(重複は除く)。
+    --labels が指定された場合はそのファイルの内容だけを対象にする。指定が無ければ
+    設定中のモデルが実際に出すラベル (vocab.runtime_labels) を対象にする。
     """
     if args.labels:
         with open(args.labels, encoding="utf-8") as f:
             return [line.strip() for line in f if line.strip()]
-
-    labels = list(COCO_JA.keys())
-    if args.lvis:
-        seen = set(labels)
-        for name in LVIS_JA.keys():
-            if name not in seen:
-                labels.append(name)
-                seen.add(name)
-    return labels
+    print(f"[precompute] モデル {config.MODEL} の語彙を読み込み中 (VOCAB={config.VOCAB})")
+    return vocab.runtime_labels()
 
 
 def main() -> None:
@@ -64,12 +55,8 @@ def main() -> None:
         description="鑑定文をラベルごとに事前生成し、EXPLAIN_CACHE_PATH へ永続化する"
     )
     parser.add_argument(
-        "--lvis", action="store_true",
-        help="LVIS 1203語彙もCOCO 80に追加して対象にする",
-    )
-    parser.add_argument(
         "--labels", metavar="PATH",
-        help="1行1ラベルのファイルを対象にする(指定するとCOCO/LVISの代わりに使う)",
+        help="1行1ラベルのファイルを対象にする(未指定なら設定中のモデルが出す全ラベル)",
     )
     parser.add_argument(
         "--force", action="store_true",
