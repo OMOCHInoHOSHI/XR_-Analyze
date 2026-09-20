@@ -18,6 +18,9 @@ vocab_untranslated.json
 calib.json
 calib.json.tmp
 
+# 読み上げ音声の永続キャッシュ(合成済みWAV。再生成可能だがバイナリで大きい)
+speak_cache/
+
 # OS
 .DS_Store
 Thumbs.db
