@@ -65,3 +65,19 @@ Intel Mac や Windows など MLX が動かない環境では `ollama pull gemma4
 macOS 同梱の `say` コマンドで読み上げることもできます(`TTS_VOICE` /
 `TTS_RATE` で調整。ターミナルで `say -v '?'` を実行すると導入済みの声を
 一覧できます)。
+
+### 読み上げ音声の事前合成
+
+合成した音声は `SPEAK_CACHE_DIR`(既定 `speak_cache/`)にディスク永続化され、
+サーバを再起動しても再利用されます([ADR-0039](adr/0039-speak-persistent-cache.md))。
+初回の合成待ち(1件5〜10秒)を無くしたい場合は、事前にまとめて合成しておけます。
+
+```bash
+python3 -m backend.precompute_speak                    # explain_cache.json の全件
+python3 -m backend.precompute_speak --labels labels.txt # 対象ラベルを絞る(1行1ラベル)
+python3 -m backend.precompute_speak --force             # 既存のキャッシュも作り直す
+```
+
+`explain_cache.json`(鑑定文の `{label: text}` JSON)が無い場合は、先にそちらの
+生成が必要である旨のメッセージを出して終了します。実行前に VOICEVOX ENGINE の
+起動が必要です(未起動だと接続エラーで中断します)。

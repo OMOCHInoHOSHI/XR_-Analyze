@@ -43,6 +43,7 @@
 | `TTS_VOICE` | Grandpa | (say専用)読み上げの声。`say -v '?'` で導入済みの声を一覧できる |
 | `TTS_RATE` | 130 | (say専用)読み上げの話速(words/min相当)。say の既定175より遅く、重々しく読ませる |
 | `TTS_TIMEOUT_SEC` | 20.0 | 読み上げの合成完了を待つ上限秒(say/voicevox共通)。実測は1件あたり voicevox 1.3〜2.9秒 / say 約0.5秒 |
+| `SPEAK_CACHE_DIR` | ./speak_cache | 読み上げ音声(WAV)のディスク永続キャッシュの保存先。空文字で無効化(プロセス内の32件LRUのみになる)([ADR-0039](adr/0039-speak-persistent-cache.md)) |
 
 > Apple Silicon(M1〜)では `DEVICE` を指定しなくても自動で `mps`(GPU)が有効に
 > なります。明示的にCPUを使いたい場合のみ `DEVICE=cpu` を指定してください。
