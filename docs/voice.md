@@ -90,6 +90,12 @@ python3 -m backend.precompute_speak --labels labels.txt # 対象ラベルを絞�
 python3 -m backend.precompute_speak --force             # 既存のキャッシュも作り直す
 ```
 
+1件の合成は 5〜10秒、COCO 80件で 63MB ほどです(実測: 平均 719KB、音声長 15秒)。
+鑑定文の事前生成(Ollama)と同時に走らせると合成が 20〜40秒まで伸び、既定の
+`TTS_TIMEOUT_SEC`(20秒)を超えて中断することがあります。その場合は
+`TTS_TIMEOUT_SEC=120 python3 -m backend.precompute_speak` のように伸ばして
+再実行してください(合成済みの分はスキップされ、続きから進みます)。
+
 `explain_cache.json`(鑑定文の `{label: text}` JSON)が無い場合は、先にそちらの
 生成が必要である旨のメッセージを出して終了します。実行前に VOICEVOX ENGINE の
 起動が必要です(未起動だと接続エラーで中断します)。
