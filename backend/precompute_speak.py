@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 import wave
 from io import BytesIO
@@ -65,6 +66,8 @@ def _wav_duration_sec(data: bytes) -> float:
 
 
 def main() -> None:
+    # ログへリダイレクトしても進捗が逐次見えるよう行バッファにする
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--explain-json", default=DEFAULT_EXPLAIN_JSON,
