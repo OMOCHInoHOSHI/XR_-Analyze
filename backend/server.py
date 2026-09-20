@@ -20,13 +20,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import queue
-import re
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,6 +34,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import calib_store, config, tts
+# モジュール名を明示的に別名にするのは、下の /explain ハンドラ関数名が
+# `explain` で、モジュール名とかぶるため(ハンドラ定義でグローバルの
+# `explain` がハンドラ関数自身に上書きされてしまう)。
+from . import explain as explain_mod
 from .detector import Detector
 from .pipeline import Pipeline
 
@@ -57,6 +57,10 @@ _shutting_down = threading.Event()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global pipeline
+    # 事前生成済みの鑑定文キャッシュを読み込む(理由: docs/adr/0038-explain-persistent-cache.md)。
+    # ファイルが無い/壊れていても explain.load_cache 側で空dictに落として起動を止めない。
+    _explain_cache.update(explain_mod.load_cache(config.EXPLAIN_CACHE_PATH))
+    print(f"[explain] 永続キャッシュから {len(_explain_cache)} 件を読み込みました")
     pipeline = Pipeline()
     pipeline.start()
     try:
@@ -156,8 +160,14 @@ async def calib_save():
 
 
 # 説明文のキャッシュ (label -> text)。生成は秒単位の処理なので、同一ラベルの
-# 再生成はしない。プロセスを起動し直せば消える(恒久保存はしない方針)。
+# 再生成はしない。起動時に EXPLAIN_CACHE_PATH から事前生成分を読み込み、新規に
+# 生成したラベルはその都度ファイルへ書き戻す(永続化。理由: docs/adr/0038-explain-persistent-cache.md)。
 _explain_cache: dict[str, str] = {}
+
+# _explain_cache をファイルへ保存する処理の直列化用ロック。ラベル単位の
+# _explain_locks とは別物: 保存のたびに _explain_cache 全体を書き出すため、
+# 異なるラベルの生成が同時に完了しても書き込み同士が競合しないようにする。
+_explain_cache_write_lock = threading.Lock()
 
 # ラベルごとの生成ロック。窓を閉じてもサーバ側の生成は止まらないため、
 # 「固定→窓を閉じる→固定解除→再固定」等で同じ未キャッシュのラベルに対する
@@ -301,27 +311,6 @@ def _speak_worker() -> None:
 # デーモンスレッドとして常駐させる(プロセス終了時に道連れで終わってよい)。
 threading.Thread(target=_speak_worker, daemon=True).start()
 
-# 文の区切り。句読点(。！？!?)と改行を区切りとみなし、区切り文字は文に含めたまま切り出す。
-_SENTENCE_END_RE = re.compile(r"[。！？!?\n]")
-
-
-def _split_sentences(buffer: str) -> tuple[list[str], str]:
-    """
-    ストリーミング中のバッファから確定した文を切り出す。
-
-    区切り文字(。！？!?・改行)を含めたまま各文を返し、まだ区切りが来ていない
-    末尾は次回に持ち越すバッファとして返す。空白だけの断片は捨てる。
-    """
-    sentences: list[str] = []
-    start = 0
-    for m in _SENTENCE_END_RE.finditer(buffer):
-        end = m.end()
-        piece = buffer[start:end]
-        if piece.strip():
-            sentences.append(piece)
-        start = end
-    return sentences, buffer[start:]
-
 
 class ExplainRequest(BaseModel):
     """説明を生成する物体。label は検出ラベル(英語)、ja はフロントの日本語表示名(任意)。"""
@@ -330,99 +319,28 @@ class ExplainRequest(BaseModel):
     ja: str | None = None
 
 
-def _ollama_explain(label: str, ja: str | None) -> str:
+def _explain_and_prefetch_speech(label: str, ja: str | None) -> str:
     """
-    Ollama の /api/chat を呼び、物体の日本語説明文を得る。
-
-    依存を増やさないため HTTP クライアントは stdlib の urllib で済ませる。
-    この関数は同期 def なエンドポイントから呼ぶため、FastAPI がスレッドプールで
-    実行し、イベントループを塞がない。
-
-    ストリーミング(stream:True)で受け、一文が確定するたびに読み上げの先読み
-    合成キューへ渡す。鑑定文の生成には数秒かかる(実測: ウォーム時2〜3秒、
-    モデル未ロード時は+5〜19秒)ため、その裏で合成を進めておけば、全文が
-    画面に出る頃には音声もほぼ揃っている。ただし合成は別スレッドで進むため、
-    この関数(ひいては /explain)を遅らせることはない。
+    explain.generate を呼んで鑑定文を得つつ、確定した文から読み上げの先読み
+    合成キューへ積む(_enqueue_speak_sentence)。生成そのものの実装(プロンプト・
+    NDJSON受信・文分割)は explain.py に切り出してあり、ここは「1文でも積んだら
+    締めの合図(_finalize_speak_job)を送る」という server 側の責務だけを持つ。
+    ただし合成は別スレッドで進むため、この関数(ひいては /explain)を遅らせることはない。
     """
-    name = ja if ja else label
-    # 鑑定士の人物像と2分岐ルール(昔からの道具は素直に/科学の産物は遺物として
-    # 正体を明かさない)は実測で調整した。世界観の理由: docs/adr/0024-llm-object-explanation.md
-    # 文面は短縮版を使う。224→165トークンでprefillが軽くなり、境界物体でのA/Bでも
-    # 判定ルールの遵守に差が無かった (実測: docs/adr/0036-llm-generation-latency.md)
-    prompt = (
-        "剣と魔法の異世界の「無口な職人鑑定士」として、手元の物体を"
-        "日本語2〜3文で淡々と鑑定する。\n"
-        f"物体名: {name} ({label})\n"
-        "ルール:\n"
-        "- 傘・杯・剣・本など昔からある道具 → 用途と価値を素直に語る。"
-        "過度な神秘化はしない\n"
-        "- PC・携帯・カメラ・車など科学技術の産物 → 「古代文明の遺物」として"
-        "正体を明かさず、見た目の観察と推測・畏怖を交えて語る\n"
-        "- 感嘆詞(ふむ・ほう等)は使わない。見出し・箇条書き・装飾記法は禁止。"
-        "鑑定文のみ出力"
-    )
-    # think:false は必須。付けないと英語の思考トレースが出て、時間も余計にかかる
-    # (理由: docs/adr/0024-llm-object-explanation.md)
-    # keep_alive でモデルをGPUメモリに残し、未ロードからの12〜19秒を避ける
-    # num_predict は出力の上限。実測の鑑定文は35〜70トークンなので80で足りる
-    # (実測: docs/adr/0036-llm-generation-latency.md)
-    body = json.dumps({
-        "model": config.OLLAMA_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": True,
-        "think": False,
-        "keep_alive": config.OLLAMA_KEEP_ALIVE,
-        "options": {"temperature": 0.4, "num_predict": 80},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{config.OLLAMA_URL.rstrip('/')}/api/chat",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    buffer = ""                  # 区切りがまだ来ていない末尾の断片
-    full_parts: list[str] = []   # 確定した文の並び。連結すると全文になる
-    job_started = False          # 先読みジョブを1文でも積んだか(締めの合図が要るか)
+    job_started = False  # 先読みジョブを1文でも積んだか(締めの合図が要るか)
+
+    def on_sentence(sentence: str) -> None:
+        nonlocal job_started
+        _enqueue_speak_sentence(label, sentence)
+        job_started = True
+
     try:
-        with urllib.request.urlopen(req, timeout=config.EXPLAIN_TIMEOUT_SEC) as resp:
-            # NDJSON: 1行1JSON。message.content を連結して全文を組み立てる
-            for raw_line in resp:
-                line = raw_line.decode("utf-8").strip()
-                if not line:
-                    continue
-                chunk = json.loads(line)
-                content = (chunk.get("message") or {}).get("content", "")
-                if content:
-                    buffer += content
-                    sentences, buffer = _split_sentences(buffer)
-                    for sentence in sentences:
-                        full_parts.append(sentence)
-                        _enqueue_speak_sentence(label, sentence)
-                        job_started = True
-                if chunk.get("done"):
-                    break
-        # 区切り文字が来ないまま終わった末尾も、最後の一文として合成に回す
-        if buffer.strip():
-            full_parts.append(buffer)
-            _enqueue_speak_sentence(label, buffer)
-            job_started = True
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-        # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける
-        raise HTTPException(
-            status_code=503,
-            detail="鑑定の力 (Ollama) に接続できません。起動を確認してください (ollama serve)",
-        ) from e
+        return explain_mod.generate(label, ja, on_sentence=on_sentence)
     finally:
         # 1文でも積んだなら、合成は別スレッドで進む。締めの合図を必ず送り、
         # 待っている /speak の Event が固まらないようにする。
         if job_started:
             _finalize_speak_job(label)
-    text = "".join(full_parts).strip()
-    if not text:
-        raise HTTPException(
-            status_code=503, detail="鑑定文の生成が空でした。もう一度お試しください"
-        )
-    return text
 
 
 @app.post("/explain")
@@ -431,7 +349,9 @@ def explain(req: ExplainRequest):
     物体ラベルから日本語の説明文を生成する(フロントの説明ウィンドウ用)。
 
     クラウドAPIではなくローカルLLM(Ollama)にした理由: docs/adr/0024-llm-object-explanation.md
-    同一ラベルはキャッシュを返し、生成は1回だけ行う。
+    同一ラベルはキャッシュを返し、生成は1回だけ行う。プロセス内キャッシュに無くても
+    起動時に読み込んだ永続キャッシュ(EXPLAIN_CACHE_PATH)に載っていればそれを返す
+    (理由: docs/adr/0038-explain-persistent-cache.md)。
 
     同一ラベルの生成はラベル単位のロックで直列化する(single-flight)。理由:
     ロック無しで同じ未キャッシュのラベルに対する呼び出しが並行すると、
@@ -446,8 +366,17 @@ def explain(req: ExplainRequest):
         cached = _explain_cache.get(req.label)
         if cached is not None:
             return {"label": req.label, "text": cached}
-        text = _ollama_explain(req.label, req.ja)
+        try:
+            text = _explain_and_prefetch_speech(req.label, req.ja)
+        except (explain_mod.ExplainUnavailable, explain_mod.ExplainEmpty) as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
         _explain_cache[req.label] = text
+        # 永続キャッシュへ書き戻す。失敗しても生成自体は成功しているので 500 にはしない。
+        with _explain_cache_write_lock:
+            try:
+                explain_mod.save_cache(config.EXPLAIN_CACHE_PATH, dict(_explain_cache))
+            except OSError as e:
+                print(f"[explain] 永続キャッシュの保存に失敗しました: {e}")
     return {"label": req.label, "text": text}
 
 

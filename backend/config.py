@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import platform
+from pathlib import Path
 
 from .calib_store import calib_path as _calib_path
 from .calib_store import load as _load_saved_view
@@ -234,6 +235,16 @@ OLLAMA_KEEP_ALIVE: str = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 # かかるため、未ロードでも切れない余裕を見て60秒にする
 # (実測: docs/adr/0036-llm-generation-latency.md)。
 EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 60.0)
+
+# 全ラベル分の鑑定文を事前生成して溜めておく永続キャッシュの保存先(JSON)。
+# COCO/LVISの語彙は有限なので、あらかじめ全件生成しておけばウォーム時でも
+# 約2秒かかる生成(docs/adr/0036-llm-generation-latency.md)を待たずに済む。
+# calib.json と同じ「プロジェクトルート直下」の流儀 (理由: docs/adr/0038-explain-persistent-cache.md)。
+# 空文字にすると永続化を無効化し、プロセス内キャッシュのみで動く。
+EXPLAIN_CACHE_PATH: str = os.environ.get(
+    "EXPLAIN_CACHE_PATH",
+    str(Path(__file__).resolve().parent.parent / "explain_cache.json"),
+).strip()
 
 # --- 読み上げ (TTS) ---
 # 鑑定文を音声で読み上げる。選択肢は
