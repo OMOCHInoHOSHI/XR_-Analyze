@@ -6,6 +6,11 @@
 
 取得と推論はスレッドを分けてある。推論がカメラ待ちで止まらず、常に最新フレームを
 推論できる (理由: docs/adr/0017-decoupled-capture-thread.md)
+
+接触不良でカメラが途中で切れることがあるため、取得スレッドが連続読み取り失敗を
+検知したら自動で再オープンし、復帰まで「再接続中」プレースホルダーを配信する。
+復帰すればフレームの供給が再開され、表示と処理も自動で続く
+(理由: docs/adr/0035-camera-auto-reconnect.md)
 """
 from __future__ import annotations
 
@@ -16,8 +21,8 @@ from typing import Optional
 import numpy as np
 
 from . import config
-from .camera import Camera, select_camera_index
-from .detector import Detection, Detector
+from .camera import Camera, reconnect_candidates, select_camera_index
+from .detector import Detection, Detector, render_notice_frame
 from .stabilizer import DetectionStabilizer
 
 
@@ -61,9 +66,14 @@ class Pipeline:
         self._running = False
         self._threads: list[threading.Thread] = []
         self._error: Optional[str] = None
+        # カメラ切断中(再オープン試行中)か。配信側へは camera_status で見せる。
+        self._reconnecting = False
+        # stop() を再接続待ちの sleep に伝える合図。Event なので待ちが即座に抜ける。
+        self._stop_event = threading.Event()
 
     # --- ライフサイクル ---
     def start(self) -> None:
+        self._stop_event.clear()
         self._camera.open()
         self._running = True
         self._threads = [
@@ -75,24 +85,77 @@ class Pipeline:
 
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()  # 再接続待ちで眠っている取得スレッドを起こす
         self._raw_ready.set()  # 待機中の推論スレッドを起こして終了させる
         for t in self._threads:
             t.join(timeout=2.0)
+        # スレッドが生き残っている(=再オープン中で try_open が長引いている)場合は
+        # release を行わない。別スレッドから release すると try_open と競合し、
+        # さらに開け直されてカメラを掴んだままになる恐れがあるため
+        # (理由: docs/adr/0035-camera-auto-reconnect.md)
+        alive = any(t.is_alive() for t in self._threads)
         self._threads = []
-        self._camera.release()
+        if not alive:
+            self._camera.release()
 
     # --- 取得スレッド ---
     def _capture_loop(self) -> None:
-        """カメラを回し続け、最新の生フレームだけを保持する。古い分は捨てる。"""
+        """
+        カメラを回し続け、最新の生フレームだけを保持する。古い分は捨てる。
+
+        grab() が連続して失敗したら切断とみなし、release して再オープンに
+        切り替える。復帰するまで CAM_RETRY_WAIT 秒間隔で試し続け、復帰すれば
+        フレームの供給(=表示と処理)を自動で再開する
+        (理由: docs/adr/0035-camera-auto-reconnect.md)
+        """
+        fails = 0
+        open_ok = True  # start() で open() 済み
         while self._running:
-            ok, frame = self._camera.grab()
-            if not ok or frame is None:
+            if not open_ok:
+                # 切断中: カメラが戻るまで再オープンを試し続ける
+                if self._try_reopen():
+                    open_ok = True
+                    fails = 0
+                else:
+                    # sleep でなく Event 待ち。stop() が即座に抜けられるようにするため
+                    self._stop_event.wait(config.CAM_RETRY_WAIT)
+                continue
+
+            try:
+                ok, frame = self._camera.grab()
+            except Exception:
+                # release 後の grab() 等で例外が出てもループは止めない
+                ok, frame = False, None
+
+            if ok and frame is not None:
+                self._publish_raw(frame)
+                if self._reconnecting:
+                    # 実フレームが届いた時点を「復帰」とする。再オープン直後は
+                    # まだ映像が届いていないので、プレースホルダーと
+                    # reconnecting 表示をそのまま維持する
+                    self._set_reconnecting(False)
+                    print(f"[camera] 映像が復帰しました (index={self._camera.index})")
+                fails = 0
+                continue
+
+            fails += 1
+            if not config.CAM_RECONNECT or fails < config.CAM_FAIL_LIMIT:
                 time.sleep(0.01)
                 continue
-            with self._raw_lock:
-                self._raw_frame = frame
-                # 取り出し側が同じロックの中で clear() するので、set() もロック内で行う
-                self._raw_ready.set()
+
+            # 連続失敗が閾値に達したので切断とみなし、再オープンへ切り替える
+            print(
+                f"[camera] カメラとの接続が切れました。再接続を試みます "
+                f"(index={self._camera.index})"
+            )
+            self._enter_reconnecting()
+            open_ok = False
+
+    def _publish_raw(self, frame: np.ndarray) -> None:
+        with self._raw_lock:
+            self._raw_frame = frame
+            # 取り出し側が同じロックの中で clear() するので、set() もロック内で行う
+            self._raw_ready.set()
 
     def _take_raw_frame(self) -> Optional[np.ndarray]:
         """最新の生フレームを取り出す。無ければ届くまで待つ。"""
@@ -103,6 +166,55 @@ class Pipeline:
             self._raw_frame = None
             self._raw_ready.clear()
         return frame
+
+    # --- カメラ再接続 ---
+    def _set_reconnecting(self, value: bool) -> None:
+        with self._lock:
+            self._reconnecting = value
+
+    @property
+    def reconnecting(self) -> bool:
+        with self._lock:
+            return self._reconnecting
+
+    def _enter_reconnecting(self) -> None:
+        """
+        切断とみなした時点の片付け。
+
+        古いフレーム/検出を捨て、「再接続中」プレースホルダーを最新フレームとして
+        配信する。これで画面が最終フレームのまま凍結して見えることを防ぐ
+        (理由: docs/adr/0035-camera-auto-reconnect.md)
+        """
+        w, h = self._camera.actual_size
+        placeholder = render_notice_frame(
+            w, h, "カメラを再接続しています...", "Camera reconnecting...",
+        )
+        # 先にフラグを立てて、推論スレッドが古い結果で画面を上書きするのを止める
+        self._set_reconnecting(True)
+        # 古い生フレームを捨てる(復帰直後に古い1枚が一瞬映るのを防ぐ)
+        with self._raw_lock:
+            self._raw_frame = None
+            self._raw_ready.clear()
+        with self._lock:
+            self._frame = placeholder
+            self._detections = []
+            self._frame_id += 1
+
+    def _try_reopen(self) -> bool:
+        """
+        カメラの再オープンを1回試みる。成功すれば True。
+
+        起動時に開いていたカメラ(index を記録してある)を最優先にし、CAM_INDEX を
+        明示していないときは CAM_NAME での名前再解決も試す。USB の抜き差しで
+        index がずれても名前で追従できる (理由: docs/adr/0035-camera-auto-reconnect.md)
+        """
+        self._camera.release()
+        for idx in reconnect_candidates(self.cam_index, config.CAM_INDEX_ENV, config.CAM_NAME):
+            self._camera.index = idx
+            if self._camera.try_open():
+                self.cam_index = idx
+                return True
+        return False
 
     # --- 推論スレッド ---
     def _infer_loop(self) -> None:
@@ -127,6 +239,10 @@ class Pipeline:
             dt = now - last
             last = now
             with self._lock:
+                if self._reconnecting:
+                    # 再接続中は古い検出結果で画面を上書きしない。
+                    # プレースホルダー配信を優先する (理由: docs/adr/0035-camera-auto-reconnect.md)
+                    continue
                 self._frame = frame
                 self._detections = dets
                 self._frame_id += 1
@@ -173,6 +289,7 @@ class Pipeline:
         with self._lock:
             fid = self._frame_id
             dets = [d.to_dict() for d in self._detections]
+            reconnecting = self._reconnecting
         w, h = self._camera.actual_size
         return {
             "frame_id": fid,
@@ -181,6 +298,9 @@ class Pipeline:
             "source_size": {"w": w, "h": h},
             # フロントの HUD 表示用。サーバが持つ値を正とし、クランプ後の実値を返す。
             "view": self.view(),
+            # カメラの稼働状態。"reconnecting" の間はフロントが再接続中表示を出す。
+            # (契約: docs/api.md)
+            "camera_status": "reconnecting" if reconnecting else "ok",
             "detections": dets,
             "error": self._error,
         }

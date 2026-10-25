@@ -14,6 +14,9 @@
 | `CAM_FLIP` | 180 | 映像の向き補正。`180`(上下+左右) / `v`(上下) / `h`(左右) / `none`(補正なし) |
 | `CAM_ZOOM` | 1.0 | デジタルズーム倍率(中央クロップ)。1.0で等倍、1.5なら幅・高さを1/1.5に中央クロップ。1.0未満は無効(1.0にクランプ)。**指定すると `calib.json` の保存値より優先** |
 | `CAM_OFFSET_X` / `CAM_OFFSET_Y` | 0.0 / 0.0 | 切り抜き中心のオフセット。フレーム幅/高さに対する正規化値(0.1=幅の10%右へ、yは+で下へ)。**指定すると保存値より優先** |
+| `CAM_RECONNECT` | 1 | カメラ切断の自動再接続(camera.md「カメラの自動再接続」)。`0` で無効 |
+| `CAM_FAIL_LIMIT` | 30 | `grab()` の連続失敗を何回数えたら切断とみなすか。失敗は10ms間隔で数えるため、既定30回は下限0.3秒・おおむね0.3〜1秒程度 |
+| `CAM_RETRY_WAIT` | 1.0 | 再オープンに失敗したときの再試行間隔(秒)。カメラが戻るまで試し続ける |
 | `CALIB_FILE` | ./calib.json | 合わせ込み値(ズーム/位置)の保存先。ブラウザで `s` を押すと書き込まれ、次回起動時に自動で読まれる |
 | `MODEL` | yolov8n.pt | 検出モデル。detection.md「認識できる物体を増やす」参照 |
 | `CLASSES` | (未指定) | オープン語彙モデルで検出する物体名(カンマ区切り)。例: `wallet,watch,ring` |
@@ -28,8 +31,9 @@
 | `JP_FONT` | (自動) | MJPEGの日本語描画フォント。自動検出に失敗する時だけ .ttc/.ttf を指定 |
 | `PORT` | 8100 | サーバポート |
 | `OLLAMA_URL` | http://localhost:11434 | AI説明(voice.md「固定した物体の AI 説明」)で呼ぶ Ollama のアドレス |
-| `OLLAMA_MODEL` | gemma4:e4b | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名 |
-| `EXPLAIN_TIMEOUT_SEC` | 30.0 | AI説明の生成完了を待つ上限秒。初回生成は実測約7.5秒 |
+| `OLLAMA_MODEL` | gemma4:e4b-mlx (Apple Silicon) / gemma4:e4b (その他) | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名。Apple Silicon では MLX エンジン版が既定 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
+| `OLLAMA_KEEP_ALIVE` | 30m | 生成後モデルをGPUメモリに残す時間。未ロードからの1回目は実測5〜19秒かかるため長め。`0` で即解放 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
+| `EXPLAIN_TIMEOUT_SEC` | 60.0 | AI説明の生成完了を待つ上限秒。コールド時は実測最大27秒 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `TTS_BACKEND` | voicevox | 鑑定文の読み上げ方式。`voicevox`(VOICEVOX ENGINE) / `say`(macOS同梱コマンド) / `off`(無効) |
 | `VOICEVOX_URL` | http://localhost:50021 | VOICEVOX ENGINE の接続先 |
 | `VOICEVOX_SPEAKER` | 82 | VOICEVOX の話者ID。既定は「青山龍星」のスタイル「不機嫌」。`GET /speakers` で一覧できる |
@@ -47,3 +51,8 @@
 > カメラを逆さに取り付けている前提で、既定で映像を180°回転させています。向きが
 > おかしい場合は `CAM_FLIP` を変更してください(`CAM_FLIP=none` で補正なし)。
 > ([ADR-0007](adr/0007-viewport-crop-calibration.md))
+
+> 接触不良などでカメラが稼働中に外れても、サーバは切断を検知して自動で
+> 再接続を試みます。切断中は「カメラを再接続しています...」のプレースホルダー
+> 映像を配信します。動作の詳細は camera.md「カメラの自動再接続」を参照してください。
+> ([ADR-0035](adr/0035-camera-auto-reconnect.md))

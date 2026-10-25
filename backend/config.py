@@ -76,6 +76,18 @@ CAM_WIDTH: int = _int("CAM_WIDTH", 1280)
 CAM_HEIGHT: int = _int("CAM_HEIGHT", 720)
 CAM_FPS: int = _int("CAM_FPS", 30)
 
+# --- カメラ自動再接続 ---
+# 接触不良などでカメラが途中で外れても、再び刺されば自動で再オープンし、
+# 映像と処理を復帰させる。切断中は「再接続中」のプレースホルダーを配信する。
+# 動作の詳細: docs/adr/0035-camera-auto-reconnect.md
+CAM_RECONNECT: bool = _bool("CAM_RECONNECT", True)
+# 連続でこの回数だけ grab() に失敗したら切断とみなして再オープンへ切り替える。
+# 失敗は 10ms 間隔で数えるので、既定 30 回は下限 0.3 秒。失敗1回あたりの所要次第で
+# おおむね 0.3〜1 秒程度で検知する。
+CAM_FAIL_LIMIT: int = _int("CAM_FAIL_LIMIT", 30)
+# 再オープンに失敗したときの再試行間隔(秒)。カメラが戻るまで試し続ける。
+CAM_RETRY_WAIT: float = _float("CAM_RETRY_WAIT", 1.0)
+
 # 取得フレームの向き補正。カメラが逆さに取り付けられているため既定で180°回転。
 #   "180"  : 上下+左右を反転(= 180°回転)。逆さ付けカメラの正しい補正。
 #   "v"    : 上下のみ反転
@@ -195,9 +207,33 @@ JPEG_QUALITY: int = _int("JPEG_QUALITY", 70)
 # 単体鑑定で固定した物体の説明文をローカルLLM(Ollama)で生成する。
 # モデル選定の経緯: docs/adr/0024-llm-object-explanation.md
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
-# 生成完了を待つ上限秒。初回生成は実機で約7.5秒かかるため20秒以上を推奨。
-EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 30.0)
+
+
+def _default_ollama_model() -> str:
+    """
+    AI説明に使うモデルの既定値。
+
+    Apple Silicon では MLX エンジン版(gemma4:e4b-mlx)を使う。同じ4bit量子化でも
+    prefill が実測で約3倍速く(240→720 tok/s)、ウォーム時の鑑定文が約2秒で返る。
+    ただし `ollama pull gemma4:e4b-mlx` が必要 (実測と経緯:
+    docs/adr/0036-llm-generation-latency.md)。それ以外の環境では llama.cpp 版の
+    gemma4:e4b を使う。
+    """
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        return "gemma4:e4b-mlx"
+    return "gemma4:e4b"
+
+
+OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", _default_ollama_model())
+# 生成後にモデルをGPUメモリへ残す時間。未ロードからの1回目は実測5〜19秒かかり、
+# 既定の5分だと鑑定の間隔が空くたびにこれを払う。30分はYOLO/VOICEVOXと
+# メモリを競合させないための折衷。即解放したい場合は "0" を指定する。
+# 実測と選定理由: docs/adr/0036-llm-generation-latency.md
+OLLAMA_KEEP_ALIVE: str = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+# 生成完了を待つ上限秒。ウォーム時は約2〜10秒、未ロード時は実測で最大27秒
+# かかるため、未ロードでも切れない余裕を見て60秒にする
+# (実測: docs/adr/0036-llm-generation-latency.md)。
+EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 60.0)
 
 # --- 読み上げ (TTS) ---
 # 鑑定文を音声で読み上げる。選択肢は

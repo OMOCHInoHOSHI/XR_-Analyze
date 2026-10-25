@@ -1,0 +1,4 @@
+# 開発用(テスト)の依存。本番の実行には不要。
+# 導入: .venv/bin/pip install -r backend/requirements-dev.txt
+-r requirements.txt
+pytest>=8.0

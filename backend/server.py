@@ -3,6 +3,7 @@
 
 エンドポイント:
   GET  /            -> フロント(frontend/index.html)があれば配信
+  GET  /static/*    -> フロントの静的資源 (style.css / app.js)
   GET  /healthz     -> 稼働確認 + 実測fps
   WS   /ws          -> 検出結果JSONをSTREAM_FPSで配信 (Web/Unity/Android共通の契約)
   GET  /video       -> 注釈付きMJPEG (デバッグ確認用。ブラウザで直接開ける)
@@ -33,6 +34,7 @@ from pathlib import Path
 import cv2
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import calib_store, config, tts
@@ -74,6 +76,7 @@ async def healthz():
     payload = pipeline.detections_payload()
     return {
         "status": "ok",
+        "camera_status": payload["camera_status"],
         "fps": payload["fps"],
         "frame_id": payload["frame_id"],
         "model": config.MODEL,
@@ -91,6 +94,11 @@ async def index():
     return JSONResponse(
         {"message": "backend running", "ws": "/ws", "video": "/video", "health": "/healthz"}
     )
+
+
+# フロントの静的資源 (style.css / app.js) の配信。index.html だけは上の / から
+# FileResponse で配るので、ここへ含める必要はない。
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
 class CalibRequest(BaseModel):
@@ -331,34 +339,40 @@ def _ollama_explain(label: str, ja: str | None) -> str:
     実行し、イベントループを塞がない。
 
     ストリーミング(stream:True)で受け、一文が確定するたびに読み上げの先読み
-    合成キューへ渡す。鑑定文の生成には約7.5秒かかるため、その裏で合成を
-    進めておけば、全文が画面に出る頃には音声もほぼ揃っている。ただし合成は
-    別スレッドで進むため、この関数(ひいては /explain)を遅らせることはない。
+    合成キューへ渡す。鑑定文の生成には数秒かかる(実測: ウォーム時2〜3秒、
+    モデル未ロード時は+5〜19秒)ため、その裏で合成を進めておけば、全文が
+    画面に出る頃には音声もほぼ揃っている。ただし合成は別スレッドで進むため、
+    この関数(ひいては /explain)を遅らせることはない。
     """
     name = ja if ja else label
     # 鑑定士の人物像と2分岐ルール(昔からの道具は素直に/科学の産物は遺物として
     # 正体を明かさない)は実測で調整した。世界観の理由: docs/adr/0024-llm-object-explanation.md
+    # 文面は短縮版を使う。224→165トークンでprefillが軽くなり、境界物体でのA/Bでも
+    # 判定ルールの遵守に差が無かった (実測: docs/adr/0036-llm-generation-latency.md)
     prompt = (
-        "あなたは剣と魔法の異世界の「無口な職人鑑定士」。口数が少なく、"
-        "事実と評価のみを淡々と述べる。今まさに手元にある物体を鑑定し、日本語でつぶやく。\n"
+        "剣と魔法の異世界の「無口な職人鑑定士」として、手元の物体を"
+        "日本語2〜3文で淡々と鑑定する。\n"
         f"物体名: {name} ({label})\n"
-        "判定のルール:\n"
-        "- 傘・杯・剣・本・果物など、文明の如何を問わず昔から存在しうる道具 → "
-        "正体を素直に言い当て、用途や価値を語る。過度な神秘化はしない\n"
-        "- 電気・機械・科学技術の産物(PC・携帯・カメラ・車など) → "
-        "「古代文明の遺物」「謎の物体」として、正体を直接明かさず、"
-        "見た目の観察と推測・畏怖を交えて語る\n"
-        "- 2〜3文。感嘆詞(ふむ・ほう等)は使わない\n"
-        "- 見出し・太字(*)・箇条書きなどの装飾記法は使わず、鑑定文だけを出力する"
+        "ルール:\n"
+        "- 傘・杯・剣・本など昔からある道具 → 用途と価値を素直に語る。"
+        "過度な神秘化はしない\n"
+        "- PC・携帯・カメラ・車など科学技術の産物 → 「古代文明の遺物」として"
+        "正体を明かさず、見た目の観察と推測・畏怖を交えて語る\n"
+        "- 感嘆詞(ふむ・ほう等)は使わない。見出し・箇条書き・装飾記法は禁止。"
+        "鑑定文のみ出力"
     )
     # think:false は必須。付けないと英語の思考トレースが出て、時間も余計にかかる
     # (理由: docs/adr/0024-llm-object-explanation.md)
+    # keep_alive でモデルをGPUメモリに残し、未ロードからの12〜19秒を避ける
+    # num_predict は出力の上限。実測の鑑定文は35〜70トークンなので80で足りる
+    # (実測: docs/adr/0036-llm-generation-latency.md)
     body = json.dumps({
         "model": config.OLLAMA_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "stream": True,
         "think": False,
-        "options": {"temperature": 0.4, "num_predict": 150},
+        "keep_alive": config.OLLAMA_KEEP_ALIVE,
+        "options": {"temperature": 0.4, "num_predict": 80},
     }).encode("utf-8")
     req = urllib.request.Request(
         f"{config.OLLAMA_URL.rstrip('/')}/api/chat",

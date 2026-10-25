@@ -90,6 +90,44 @@ def _load_jp_font(size: int):
     return None
 
 
+def render_notice_frame(width: int, height: int, text_ja: str, text_en: str) -> np.ndarray:
+    """
+    黒地に中央寄せの注意書きを描いたフレームを作る。
+
+    カメラ切断中など、実映像が無い間のプレースホルダー配信用。日本語フォントが
+    見つかれば PIL で text_ja を、無ければ cv2 で text_en を描く
+    (annotate と同じフォールバック方針)。
+    """
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    font_size = max(24, int(height * 0.045))
+    font = _load_jp_font(font_size)
+
+    if font is not None:
+        from PIL import Image, ImageDraw
+
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img)
+        try:
+            l, t, r, b = draw.textbbox((0, 0), text_ja, font=font)
+            tw, th = r - l, b - t
+        except Exception:
+            tw, th = font_size * len(text_ja) // 2, font_size
+        draw.text(
+            ((width - tw) // 2, (height - th) // 2),
+            text_ja, font=font, fill=(255, 255, 255),
+        )
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+    scale = font_size / 28.0
+    thick = max(1, int(scale * 2))
+    (tw, th), _ = cv2.getTextSize(text_en, cv2.FONT_HERSHEY_SIMPLEX, scale, thick)
+    cv2.putText(
+        frame, text_en, ((width - tw) // 2, (height + th) // 2),
+        cv2.FONT_HERSHEY_SIMPLEX, scale, (255, 255, 255), thick, cv2.LINE_AA,
+    )
+    return frame
+
+
 class Detector:
     def __init__(
         self,

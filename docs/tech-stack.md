@@ -70,7 +70,7 @@ XR グラスに映す 1 枚の画面が目的であり、画面遷移も状態�
 
 | | 実機の版 | 役割 | 関連 |
 |---|---|---|---|
-| **Ollama** | 0.33.2 | 鑑定文の生成。モデルは `gemma4:e4b` (9.6GB) | [ADR-0024](adr/0024-llm-object-explanation.md) |
+| **Ollama** | 0.33.2 | 鑑定文の生成。モデルは Apple Silicon で `gemma4:e4b-mlx` (9.5GB, MLX/nvfp4)、その他は `gemma4:e4b` (9.6GB) | [ADR-0024](adr/0024-llm-object-explanation.md), [ADR-0036](adr/0036-llm-generation-latency.md) |
 | **VOICEVOX ENGINE** | 0.25.2 | 鑑定文の読み上げ。既定の話者は「青山龍星・不機嫌」(ID 82) | [ADR-0026](adr/0026-voicevox-character-voice.md) |
 | macOS `say` | (OS 同梱) | VOICEVOX を用意できない場合の退避路。`TTS_BACKEND=say` | [ADR-0025](adr/0025-inspector-voice-readout.md) |
 
