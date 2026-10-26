@@ -9,15 +9,15 @@
 
 ### A) モノの名前を幅広く知りたい(専門性不要・推奨)
 
-オープン語彙の「プロンプトフリー」モデルに切り替えます。LVIS **1203カテゴリ**で、
+オープン語彙の「プロンプトフリー」モデルを使います(**既定**)。LVIS **1203カテゴリ**で、
 クラスを指定せずに見えたモノへ名前を付けます。**この1203語は全て日本語対訳済み**
 (`backend/labels_ja_lvis.py`)なので、表示は日本語になります。
 
 精度優先なら大きいモデルを使います(s < m < l で精度↑/速度↓):
 
 ```bash
-# 精度優先(推奨): l サイズ これをよく使う
-MODEL=yoloe-11l-seg-pf.pt python3 -m backend.server
+# 精度優先(推奨・既定): l サイズ。MODEL 未指定でもこれになる
+python3 -m backend.server
 
 # 速度優先: s サイズ
 MODEL=yoloe-11s-seg-pf.pt python3 -m backend.server
@@ -40,12 +40,17 @@ MODEL=yoloe-11s-seg.pt CLASSES="wallet,watch,ring,coin,trading card" \
 - `CLASSES` に無い物体は出ません。狙った物だけ拾いたいときに有効。
 - テキスト指定モードは初回にテキストエンコーダ(CLIP系)を自動取得する場合があります。
 
-### C) 既定(最軽量)
+### C) COCO 80 に割り切る(最軽量)
 
-`MODEL` 未指定なら `yolov8n.pt`(COCO 80カテゴリ)。最速・最小です。
+`MODEL=yolov8n.pt` で COCO 80カテゴリだけの標準YOLOになります。最速・最小ですが、
+鑑定できる物体が 80 種に限られます。
+
+`MODEL` 未指定なら A) の `yoloe-11l-seg-pf.pt` です(既定の経緯:
+[ADR-0040](adr/0040-default-model-yoloe.md))。
 
 > 補足: いずれも Apple Silicon では自動で `mps`(GPU)が使われます。オープン語彙
-> モデルは標準YOLOより重いので、まず `yoloe-11s-...`(s=small)から試すのが無難です。
+> モデルは標準YOLOより重いので、速度が足りなければ `yoloe-11s-...`(s=small)に
+> 落とすのが先です(語彙は同じ)。
 
 ## ラベルがコロコロ変わるとき (語彙の絞り込み)
 

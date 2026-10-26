@@ -1,0 +1,126 @@
+"""
+全ラベル分の鑑定文をあらかじめ生成し、EXPLAIN_CACHE_PATH (既定:
+explain_cache.json) へ永続化する。サーバはこのファイルを起動時に読み込むため、
+実行しておけば、生成に約2秒かかる鑑定文の待ちがフロントで発生しなくなる
+(理由: docs/adr/0038-explain-persistent-cache.md)。
+
+使い方:
+  python3 -m backend.precompute_explain                 # 設定中のモデルが出す全ラベル
+  python3 -m backend.precompute_explain --labels a.txt  # 1行1ラベルのファイルを対象にする
+  python3 -m backend.precompute_explain --force         # 既存キャッシュのラベルも生成し直す
+
+対象は既定で「サーバと同じ設定 (MODEL / CLASSES / VOCAB) で実際に配信されるラベル」
+(backend/vocab.py の runtime_labels)。サーバを動かすときと同じ環境変数を付けて
+実行する (例: MODEL=yoloe-11l-seg-pf.pt)。モデル語彙の名前がそのままキーになる
+ので、対訳辞書の見出し語で作るのと違い、キャッシュを取り逃がさない。
+
+事前に Ollama を起動しておくこと (`ollama serve`)。1件あたり実測 2〜6秒
+(機械の状態で振れる) かかるため、1000語級では 1〜2時間見込む
+(実測: docs/adr/0037-branch-specific-prompt-rejected.md)。
+
+特徴 (backend/build_ja_dict.py の構造に倣う):
+  - 途中保存・再開対応。1件生成するたびに EXPLAIN_CACHE_PATH を上書き保存する
+    ので、中断しても既生成分は残り、再実行で続きから進む。
+  - 既にキャッシュにあるラベルはスキップする(--force で再生成)。
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+
+from . import config, vocab
+from .explain import ExplainEmpty, ExplainUnavailable, generate, load_cache, save_cache
+from .labels_ja import to_ja
+
+# 一過性の失敗に対する再試行回数と待ち秒
+RETRIES = 2
+RETRY_WAIT_SEC = 5.0
+
+
+def _collect_labels(args: argparse.Namespace) -> list[str]:
+    """
+    引数から対象ラベルの一覧を作る。
+
+    --labels が指定された場合はそのファイルの内容だけを対象にする。指定が無ければ
+    設定中のモデルが実際に出すラベル (vocab.runtime_labels) を対象にする。
+    """
+    if args.labels:
+        with open(args.labels, encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip()]
+    print(f"[precompute] モデル {config.MODEL} の語彙を読み込み中 (VOCAB={config.VOCAB})")
+    return vocab.runtime_labels()
+
+
+def main() -> None:
+    # ログへリダイレクトしても進捗が逐次見えるよう行バッファにする
+    sys.stdout.reconfigure(line_buffering=True)
+    parser = argparse.ArgumentParser(
+        description="鑑定文をラベルごとに事前生成し、EXPLAIN_CACHE_PATH へ永続化する"
+    )
+    parser.add_argument(
+        "--labels", metavar="PATH",
+        help="1行1ラベルのファイルを対象にする(未指定なら設定中のモデルが出す全ラベル)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="既にキャッシュにあるラベルも生成し直す",
+    )
+    args = parser.parse_args()
+
+    labels = _collect_labels(args)
+    print(f"[precompute] 対象ラベル数: {len(labels)}")
+
+    cache = load_cache(config.EXPLAIN_CACHE_PATH)
+    print(f"[precompute] 既存キャッシュ: {len(cache)} 件 ({config.EXPLAIN_CACHE_PATH})")
+
+    todo = labels if args.force else [name for name in labels if name not in cache]
+    skipped = len(labels) - len(todo)
+    if skipped:
+        print(f"[precompute] 既存分をスキップ: {skipped} 件 (--force で再生成)")
+    print(f"[precompute] 生成対象: {len(todo)} 件")
+
+    total_start = time.time()
+    done = 0
+    for i, label in enumerate(todo, 1):
+        ja = to_ja(label)
+        start = time.time()
+        try:
+            text = None
+            # 一過性の失敗(タイムアウト等)で数時間のバッチを止めないよう再試行する
+            for attempt in range(1, RETRIES + 2):
+                try:
+                    text = generate(label, ja, on_sentence=None)
+                    break
+                except ExplainUnavailable as e:
+                    if attempt > RETRIES:
+                        raise
+                    print(f"  [retry {attempt}/{RETRIES}] {label}: {e}")
+                    time.sleep(RETRY_WAIT_SEC)
+        except ExplainUnavailable as e:
+            # 再試行しても繋がらないなら Ollama が落ちているので、ここで打ち切る。
+            # ここまでの生成分は既にファイルへ保存済み(1件ごとに保存するため)。
+            print(f"[precompute] 中断: {e}")
+            print("[precompute] Ollama を起動してから再実行してください (ollama serve)")
+            break
+        except ExplainEmpty as e:
+            # 空応答はそのラベルだけの一過性の問題とみなし、語彙全体は止めない。
+            print(f"  [skip] {label!r}: {e}")
+            continue
+
+        elapsed = time.time() - start
+        cache[label] = text
+        save_cache(config.EXPLAIN_CACHE_PATH, cache)
+        done += 1
+        print(f"  [{i}/{len(todo)}] {label} ({elapsed:.1f}秒, {len(text)}文字)")
+
+    total_elapsed = time.time() - total_start
+    avg = total_elapsed / done if done else 0.0
+    print(
+        f"[precompute] 完了。今回生成 {done} 件 / 合計 {total_elapsed:.1f}秒 / "
+        f"平均 {avg:.1f}秒/件。キャッシュ総数 {len(cache)} 件 -> {config.EXPLAIN_CACHE_PATH}"
+    )
+
+
+if __name__ == "__main__":
+    main()

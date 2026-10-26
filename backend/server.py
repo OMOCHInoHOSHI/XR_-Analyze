@@ -20,13 +20,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import queue
-import re
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -37,7 +33,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calib_store, config, tts
+from . import calib_store, config, speak_cache, tts
+# モジュール名を明示的に別名にするのは、下の /explain ハンドラ関数名が
+# `explain` で、モジュール名とかぶるため(ハンドラ定義でグローバルの
+# `explain` がハンドラ関数自身に上書きされてしまう)。
+from . import explain as explain_mod
 from .detector import Detector
 from .pipeline import Pipeline
 
@@ -57,6 +57,10 @@ _shutting_down = threading.Event()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global pipeline
+    # 事前生成済みの鑑定文キャッシュを読み込む(理由: docs/adr/0038-explain-persistent-cache.md)。
+    # ファイルが無い/壊れていても explain.load_cache 側で空dictに落として起動を止めない。
+    _explain_cache.update(explain_mod.load_cache(config.EXPLAIN_CACHE_PATH))
+    print(f"[explain] 永続キャッシュから {len(_explain_cache)} 件を読み込みました")
     pipeline = Pipeline()
     pipeline.start()
     try:
@@ -156,8 +160,14 @@ async def calib_save():
 
 
 # 説明文のキャッシュ (label -> text)。生成は秒単位の処理なので、同一ラベルの
-# 再生成はしない。プロセスを起動し直せば消える(恒久保存はしない方針)。
+# 再生成はしない。起動時に EXPLAIN_CACHE_PATH から事前生成分を読み込み、新規に
+# 生成したラベルはその都度ファイルへ書き戻す(永続化。理由: docs/adr/0038-explain-persistent-cache.md)。
 _explain_cache: dict[str, str] = {}
+
+# _explain_cache をファイルへ保存する処理の直列化用ロック。ラベル単位の
+# _explain_locks とは別物: 保存のたびに _explain_cache 全体を書き出すため、
+# 異なるラベルの生成が同時に完了しても書き込み同士が競合しないようにする。
+_explain_cache_write_lock = threading.Lock()
 
 # ラベルごとの生成ロック。窓を閉じてもサーバ側の生成は止まらないため、
 # 「固定→窓を閉じる→固定解除→再固定」等で同じ未キャッシュのラベルに対する
@@ -199,11 +209,14 @@ _speak_parts: dict[str, list[bytes]] = {}
 # label -> ここまでの断片合成がすべて成功しているか(1つでも失敗したら False)。
 _speak_ok: dict[str, bool] = {}
 
-# 合成タスクのキュー。要素は (label, 文) で、文が None ならそのラベルの
-# 文がすべて出そろったことを示す「締め」の合図。
+# 合成タスクのキュー。要素は (label, 文, 締めの全文) の3つ組。
+#   - 文の合成: (label, 文, None)
+#   - 締めの合図: (label, None, 全文)  文が出そろったラベルの確定した本文を運ぶ。
+#     ディスクキャッシュ (speak_cache) は本文のハッシュをキーに含むため、
+#     ワーカー自身は本文を持たず、締めの合図に載せてもらう必要がある。
 # 単一のワーカースレッドが順番に処理するため、同じラベルの文が並行合成されて
 # 順序が狂うことはない。
-_speak_queue: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
+_speak_queue: "queue.Queue[tuple[str, str | None, str | None]]" = queue.Queue()
 
 # _speak_cache / _speak_jobs / _speak_parts / _speak_ok はメインスレッド(FastAPIの
 # スレッドプール)とワーカースレッドの双方から触るため、変更はこのロックの下で行う。
@@ -239,19 +252,27 @@ def _enqueue_speak_sentence(label: str, sentence: str) -> None:
             _speak_jobs[label] = threading.Event()
             _trim_speak_jobs()
         _speak_ok.setdefault(label, True)
-    _speak_queue.put((label, sentence))
+    _speak_queue.put((label, sentence, None))
 
 
-def _finalize_speak_job(label: str) -> None:
-    """ラベルの文がすべて出そろったことをワーカーへ知らせる(締めの合図)。"""
-    _speak_queue.put((label, None))
+def _finalize_speak_job(label: str, text: str = "") -> None:
+    """
+    ラベルの文がすべて出そろったことをワーカーへ知らせる(締めの合図)。
+
+    text は確定した鑑定文の全文。ディスクキャッシュへの保存に使うため、
+    合成結果とセットで持たせる。呼び出し側で全文が確定していない
+    (= 例外で打ち切られた)場合は空文字のままでよく、その場合ワーカーは
+    ディスクへ保存しない。
+    """
+    _speak_queue.put((label, None, text))
 
 
 def _speak_worker() -> None:
     """
-    先読み合成の専任スレッド。キューから (label, 文) を1件ずつ取り出し、
-    順番に合成する。文が None のときは「締め」の合図で、それまでに合成できた
-    断片を結合して _speak_cache へ格納し、待っている /speak を起こす。
+    先読み合成の専任スレッド。キューから (label, 文, 締めの全文) を1件ずつ
+    取り出し、順番に合成する。文が None のときは「締め」の合図で、それまでに
+    合成できた断片を結合して _speak_cache へ格納し(あわせてディスクキャッシュ
+    speak_cache へも保存し)、待っている /speak を起こす。
 
     tts.TTSUnavailable に加え、concat_wav が壊れた断片に対して投げうる
     wave.Error/EOFError など想定外の例外もすべてここで受け止める。ここで
@@ -260,7 +281,7 @@ def _speak_worker() -> None:
     落ちる劣化状態がプロセス終了まで続いてしまうため。
     """
     while True:
-        label, sentence = _speak_queue.get()
+        label, sentence, full_text = _speak_queue.get()
         try:
             if sentence is None:
                 parts = _speak_parts.pop(label, [])
@@ -271,6 +292,12 @@ def _speak_worker() -> None:
                         with _speak_lock:
                             _speak_cache[label] = data
                             _trim_speak_cache()
+                        # 本文が確定している(= 正常終了)場合だけディスクへ保存する。
+                        # 例外で打ち切られた場合は full_text が空文字のままなので
+                        # store は no-op 相当(speak_cache.store 自体は空文字でも
+                        # 動くが、意図的に「本文とずれた保存」を避けるため呼ばない)。
+                        if full_text:
+                            speak_cache.store(label, full_text, data)
                     except Exception as e:
                         print(f"[speak] 先読み結果の結合に失敗しました ({label}): {e}")
                 with _speak_lock:
@@ -301,27 +328,6 @@ def _speak_worker() -> None:
 # デーモンスレッドとして常駐させる(プロセス終了時に道連れで終わってよい)。
 threading.Thread(target=_speak_worker, daemon=True).start()
 
-# 文の区切り。句読点(。！？!?)と改行を区切りとみなし、区切り文字は文に含めたまま切り出す。
-_SENTENCE_END_RE = re.compile(r"[。！？!?\n]")
-
-
-def _split_sentences(buffer: str) -> tuple[list[str], str]:
-    """
-    ストリーミング中のバッファから確定した文を切り出す。
-
-    区切り文字(。！？!?・改行)を含めたまま各文を返し、まだ区切りが来ていない
-    末尾は次回に持ち越すバッファとして返す。空白だけの断片は捨てる。
-    """
-    sentences: list[str] = []
-    start = 0
-    for m in _SENTENCE_END_RE.finditer(buffer):
-        end = m.end()
-        piece = buffer[start:end]
-        if piece.strip():
-            sentences.append(piece)
-        start = end
-    return sentences, buffer[start:]
-
 
 class ExplainRequest(BaseModel):
     """説明を生成する物体。label は検出ラベル(英語)、ja はフロントの日本語表示名(任意)。"""
@@ -330,99 +336,31 @@ class ExplainRequest(BaseModel):
     ja: str | None = None
 
 
-def _ollama_explain(label: str, ja: str | None) -> str:
+def _explain_and_prefetch_speech(label: str, ja: str | None) -> str:
     """
-    Ollama の /api/chat を呼び、物体の日本語説明文を得る。
-
-    依存を増やさないため HTTP クライアントは stdlib の urllib で済ませる。
-    この関数は同期 def なエンドポイントから呼ぶため、FastAPI がスレッドプールで
-    実行し、イベントループを塞がない。
-
-    ストリーミング(stream:True)で受け、一文が確定するたびに読み上げの先読み
-    合成キューへ渡す。鑑定文の生成には数秒かかる(実測: ウォーム時2〜3秒、
-    モデル未ロード時は+5〜19秒)ため、その裏で合成を進めておけば、全文が
-    画面に出る頃には音声もほぼ揃っている。ただし合成は別スレッドで進むため、
-    この関数(ひいては /explain)を遅らせることはない。
+    explain.generate を呼んで鑑定文を得つつ、確定した文から読み上げの先読み
+    合成キューへ積む(_enqueue_speak_sentence)。生成そのものの実装(プロンプト・
+    NDJSON受信・文分割)は explain.py に切り出してあり、ここは「1文でも積んだら
+    締めの合図(_finalize_speak_job)を送る」という server 側の責務だけを持つ。
+    ただし合成は別スレッドで進むため、この関数(ひいては /explain)を遅らせることはない。
     """
-    name = ja if ja else label
-    # 鑑定士の人物像と2分岐ルール(昔からの道具は素直に/科学の産物は遺物として
-    # 正体を明かさない)は実測で調整した。世界観の理由: docs/adr/0024-llm-object-explanation.md
-    # 文面は短縮版を使う。224→165トークンでprefillが軽くなり、境界物体でのA/Bでも
-    # 判定ルールの遵守に差が無かった (実測: docs/adr/0036-llm-generation-latency.md)
-    prompt = (
-        "剣と魔法の異世界の「無口な職人鑑定士」として、手元の物体を"
-        "日本語2〜3文で淡々と鑑定する。\n"
-        f"物体名: {name} ({label})\n"
-        "ルール:\n"
-        "- 傘・杯・剣・本など昔からある道具 → 用途と価値を素直に語る。"
-        "過度な神秘化はしない\n"
-        "- PC・携帯・カメラ・車など科学技術の産物 → 「古代文明の遺物」として"
-        "正体を明かさず、見た目の観察と推測・畏怖を交えて語る\n"
-        "- 感嘆詞(ふむ・ほう等)は使わない。見出し・箇条書き・装飾記法は禁止。"
-        "鑑定文のみ出力"
-    )
-    # think:false は必須。付けないと英語の思考トレースが出て、時間も余計にかかる
-    # (理由: docs/adr/0024-llm-object-explanation.md)
-    # keep_alive でモデルをGPUメモリに残し、未ロードからの12〜19秒を避ける
-    # num_predict は出力の上限。実測の鑑定文は35〜70トークンなので80で足りる
-    # (実測: docs/adr/0036-llm-generation-latency.md)
-    body = json.dumps({
-        "model": config.OLLAMA_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": True,
-        "think": False,
-        "keep_alive": config.OLLAMA_KEEP_ALIVE,
-        "options": {"temperature": 0.4, "num_predict": 80},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{config.OLLAMA_URL.rstrip('/')}/api/chat",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    buffer = ""                  # 区切りがまだ来ていない末尾の断片
-    full_parts: list[str] = []   # 確定した文の並び。連結すると全文になる
-    job_started = False          # 先読みジョブを1文でも積んだか(締めの合図が要るか)
+    job_started = False  # 先読みジョブを1文でも積んだか(締めの合図が要るか)
+    text = ""            # 確定した全文。正常終了時のみ埋まる(締めの合図に載せる)
+
+    def on_sentence(sentence: str) -> None:
+        nonlocal job_started
+        _enqueue_speak_sentence(label, sentence)
+        job_started = True
+
     try:
-        with urllib.request.urlopen(req, timeout=config.EXPLAIN_TIMEOUT_SEC) as resp:
-            # NDJSON: 1行1JSON。message.content を連結して全文を組み立てる
-            for raw_line in resp:
-                line = raw_line.decode("utf-8").strip()
-                if not line:
-                    continue
-                chunk = json.loads(line)
-                content = (chunk.get("message") or {}).get("content", "")
-                if content:
-                    buffer += content
-                    sentences, buffer = _split_sentences(buffer)
-                    for sentence in sentences:
-                        full_parts.append(sentence)
-                        _enqueue_speak_sentence(label, sentence)
-                        job_started = True
-                if chunk.get("done"):
-                    break
-        # 区切り文字が来ないまま終わった末尾も、最後の一文として合成に回す
-        if buffer.strip():
-            full_parts.append(buffer)
-            _enqueue_speak_sentence(label, buffer)
-            job_started = True
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-        # HTTPError(接続先の4xx/5xx)は URLError の派生なので、ここでまとめて受ける
-        raise HTTPException(
-            status_code=503,
-            detail="鑑定の力 (Ollama) に接続できません。起動を確認してください (ollama serve)",
-        ) from e
+        text = explain_mod.generate(label, ja, on_sentence=on_sentence)
+        return text
     finally:
         # 1文でも積んだなら、合成は別スレッドで進む。締めの合図を必ず送り、
-        # 待っている /speak の Event が固まらないようにする。
+        # 待っている /speak の Event が固まらないようにする。text を渡すと
+        # ワーカー側で結合後にディスクキャッシュへも保存する(空文字なら保存しない)。
         if job_started:
-            _finalize_speak_job(label)
-    text = "".join(full_parts).strip()
-    if not text:
-        raise HTTPException(
-            status_code=503, detail="鑑定文の生成が空でした。もう一度お試しください"
-        )
-    return text
+            _finalize_speak_job(label, text)
 
 
 @app.post("/explain")
@@ -431,7 +369,9 @@ def explain(req: ExplainRequest):
     物体ラベルから日本語の説明文を生成する(フロントの説明ウィンドウ用)。
 
     クラウドAPIではなくローカルLLM(Ollama)にした理由: docs/adr/0024-llm-object-explanation.md
-    同一ラベルはキャッシュを返し、生成は1回だけ行う。
+    同一ラベルはキャッシュを返し、生成は1回だけ行う。プロセス内キャッシュに無くても
+    起動時に読み込んだ永続キャッシュ(EXPLAIN_CACHE_PATH)に載っていればそれを返す
+    (理由: docs/adr/0038-explain-persistent-cache.md)。
 
     同一ラベルの生成はラベル単位のロックで直列化する(single-flight)。理由:
     ロック無しで同じ未キャッシュのラベルに対する呼び出しが並行すると、
@@ -446,8 +386,17 @@ def explain(req: ExplainRequest):
         cached = _explain_cache.get(req.label)
         if cached is not None:
             return {"label": req.label, "text": cached}
-        text = _ollama_explain(req.label, req.ja)
+        try:
+            text = _explain_and_prefetch_speech(req.label, req.ja)
+        except (explain_mod.ExplainUnavailable, explain_mod.ExplainEmpty) as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
         _explain_cache[req.label] = text
+        # 永続キャッシュへ書き戻す。失敗しても生成自体は成功しているので 500 にはしない。
+        with _explain_cache_write_lock:
+            try:
+                explain_mod.save_cache(config.EXPLAIN_CACHE_PATH, dict(_explain_cache))
+            except OSError as e:
+                print(f"[explain] 永続キャッシュの保存に失敗しました: {e}")
     return {"label": req.label, "text": text}
 
 
@@ -466,14 +415,28 @@ def speak(req: SpeakRequest):
     合成は VOICEVOX ENGINE / macOS の say コマンドで行う(実装: backend/tts.py)。
     /explain のストリーミング中に文ごとの先読み合成(_speak_jobs)が進んでいれば
     その完了を待ってから返す。先読みが無い(または間に合わなかった)場合は、
-    現状どおりその場で同期合成する(退避路)。同一ラベルはキャッシュを返し、
-    再合成はしない。
+    現状どおりその場で同期合成する(退避路)。同一ラベルはメモリキャッシュを
+    返し、再合成はしない。
+
+    メモリキャッシュ(プロセス再起動で消える)にも無ければ、ディスクの永続
+    キャッシュ(backend/speak_cache.py)を試す。本文のハッシュも一致していれば
+    合成をスキップしてそのまま返せる(理由: docs/adr/0039-speak-persistent-cache.md)。
+    退避路・先読みで新たに合成した結果はディスクにも書き、次回以降に備える。
     """
     with _speak_lock:
         cached = _speak_cache.get(req.label)
         if cached is not None:
             _speak_cache.move_to_end(req.label)
             return Response(content=cached, media_type="audio/wav")
+
+    disk_cached = speak_cache.load(req.label, req.text)
+    if disk_cached is not None:
+        with _speak_lock:
+            _speak_cache[req.label] = disk_cached
+            _trim_speak_cache()
+        return Response(content=disk_cached, media_type="audio/wav")
+
+    with _speak_lock:
         job = _speak_jobs.get(req.label)
 
     if job is not None:
@@ -496,6 +459,7 @@ def speak(req: SpeakRequest):
     with _speak_lock:
         _speak_cache[req.label] = data
         _trim_speak_cache()
+    speak_cache.store(req.label, text, data)
     return Response(content=data, media_type="audio/wav")
 
 

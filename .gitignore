@@ -18,6 +18,12 @@ vocab_untranslated.json
 calib.json
 calib.json.tmp
 
+# 鑑定文の永続キャッシュ書き込み中の一時ファイル(atomic replace の中間生成物。
+# explain_cache.json 自体はコミット対象。理由: docs/adr/0038-explain-persistent-cache.md)
+explain_cache.json.tmp
+# 読み上げ音声の永続キャッシュ(合成済みWAV。再生成可能だがバイナリで大きい)
+speak_cache/
+
 # OS
 .DS_Store
 Thumbs.db

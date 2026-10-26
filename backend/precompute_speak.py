@@ -1,0 +1,169 @@
+"""
+鑑定文の読み上げ音声をあらかじめ合成し、ディスクの永続キャッシュ
+(backend/speak_cache.py, 既定 speak_cache/)へ書き溜めておくスクリプト。
+
+サーバ起動中の初回読み上げは合成に5〜10秒かかる(VOICEVOX)。事前に
+まとめて合成しておけば、実運用ではディスクキャッシュから即座に返せる
+(理由・容量見積り: docs/adr/0039-speak-persistent-cache.md)。
+
+使い方:
+  1) 先に鑑定文そのものを用意する。本スクリプトは鑑定文を生成しない。
+     別ブランチで並行実装中の永続キャッシュ (explain_cache.json,
+     {label: text} 形式) を既定で読む。
+  2) VOICEVOX ENGINE を起動しておく(TTS_BACKEND=voicevox が既定)。
+  3) 実行:
+       python3 -m backend.precompute_speak            # 設定中のモデルが出す全ラベル
+     対象を絞る/広げる場合:
+       python3 -m backend.precompute_speak --labels labels.txt   # 1行1ラベル
+       python3 -m backend.precompute_speak --all                 # explain-json の全件
+     既存ファイルも合成し直す場合:
+       python3 -m backend.precompute_speak --force
+     既定の対象は precompute_explain と同じく、サーバと同じ設定 (MODEL / CLASSES /
+     VOCAB) で実際に配信されるラベル (backend/vocab.py の runtime_labels)。
+     サーバを動かすときと同じ環境変数を付けて実行する。
+
+特徴:
+  - 既に speak_cache.path_for の場所にファイルがあればスキップ(--force で再合成)。
+  - VOICEVOX に接続できない(tts.TTSUnavailable)場合は即中断する。
+  - 各件の所要秒・WAVサイズ・音声長を表示し、最後に合計・平均を出す
+    (ディスク容量の見積りに使う)。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+import wave
+from io import BytesIO
+
+from . import config, speak_cache, tts, vocab
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_EXPLAIN_JSON = os.path.join(ROOT, "explain_cache.json")
+# 一過性の失敗(壊れた応答・タイムアウト)に対する再試行回数と待ち秒
+RETRIES = 2
+RETRY_WAIT_SEC = 5.0
+
+
+def _load_explain_cache(path: str) -> dict[str, str]:
+    if not os.path.exists(path):
+        raise SystemExit(
+            f"{path} が見つかりません。先に鑑定文の事前生成が必要です"
+            "(explain_cache.json を用意してから再実行してください)。"
+        )
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise SystemExit(f"{path} の形式が不正です({{label: text}} の JSON を想定)")
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def _load_labels(path: str) -> list[str]:
+    with open(path, encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def _wav_duration_sec(data: bytes) -> float:
+    with wave.open(BytesIO(data), "rb") as w:
+        frames = w.getnframes()
+        rate = w.getframerate()
+        return frames / rate if rate else 0.0
+
+
+def main() -> None:
+    # ログへリダイレクトしても進捗が逐次見えるよう行バッファにする
+    sys.stdout.reconfigure(line_buffering=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--explain-json", default=DEFAULT_EXPLAIN_JSON,
+        help=f"鑑定文の {{label: text}} JSON (既定: {DEFAULT_EXPLAIN_JSON})",
+    )
+    parser.add_argument(
+        "--labels", default=None,
+        help="対象ラベルの1行1ラベルのファイル(未指定なら設定中のモデルが出す全ラベル)",
+    )
+    parser.add_argument(
+        "--all", action="store_true",
+        help="explain-json にある全件を対象にする(モデルを読み込まない)",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="ディスクキャッシュに既にあっても再合成する",
+    )
+    args = parser.parse_args()
+
+    explain_cache = _load_explain_cache(args.explain_json)
+    if args.labels:
+        labels = _load_labels(args.labels)
+    elif args.all:
+        labels = list(explain_cache.keys())
+    else:
+        print(f"[precompute_speak] モデル {config.MODEL} の語彙を読み込み中 (VOCAB={config.VOCAB})")
+        labels = vocab.runtime_labels()
+
+    targets: list[tuple[str, str]] = []
+    missing: list[str] = []
+    for label in labels:
+        text = explain_cache.get(label)
+        if text is None:
+            missing.append(label)
+            continue
+        targets.append((label, text))
+    if missing:
+        print(f"[precompute_speak] 鑑定文が無いためスキップ: {len(missing)} 件 ({', '.join(missing[:10])}{'...' if len(missing) > 10 else ''})")
+
+    print(f"[precompute_speak] 対象 {len(targets)} 件")
+
+    durations: list[float] = []
+    sizes: list[int] = []
+    skipped = 0
+    for i, (label, text) in enumerate(targets, 1):
+        path = speak_cache.path_for(label, text)
+        if path.exists() and not args.force:
+            print(f"  [{i}/{len(targets)}] {label}: 既存のためスキップ ({path.name})")
+            skipped += 1
+            continue
+
+        start = time.time()
+        data = None
+        # ENGINE は数百件の連続合成中に一度だけ壊れた応答を返すことがある(実測)。
+        # 1件の失敗で数時間のバッチを止めないよう、短い間を置いて再試行し、
+        # それでも駄目なら ENGINE が落ちたとみなして中断する。
+        for attempt in range(1, RETRIES + 2):
+            try:
+                data = tts.synthesize(text)
+                break
+            except tts.TTSUnavailable as e:
+                if attempt > RETRIES:
+                    raise SystemExit(
+                        f"音声合成エンジンに接続できません: {e}\n"
+                        "VOICEVOX ENGINE (または対応アプリ) を起動してから再実行してください。"
+                    )
+                print(f"  [retry {attempt}/{RETRIES}] {label}: {e}")
+                time.sleep(RETRY_WAIT_SEC)
+        elapsed = time.time() - start
+        speak_cache.store(label, text, data)
+
+        size = len(data)
+        duration = _wav_duration_sec(data)
+        durations.append(duration)
+        sizes.append(size)
+        print(
+            f"  [{i}/{len(targets)}] {label}: {elapsed:.2f}秒 / "
+            f"{size / 1024:.1f}KB / 音声長 {duration:.1f}秒 -> {path.name}"
+        )
+
+    print(f"[precompute_speak] 完了。新規合成 {len(sizes)} 件 / スキップ {skipped} 件")
+    if sizes:
+        total = sum(sizes)
+        print(
+            f"[precompute_speak] 合計サイズ: {total / 1024 / 1024:.2f}MB / "
+            f"平均サイズ: {total / len(sizes) / 1024:.1f}KB / "
+            f"平均音声長: {sum(durations) / len(durations):.1f}秒"
+        )
+
+
+if __name__ == "__main__":
+    main()

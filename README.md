@@ -31,7 +31,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
 pip install -r backend/requirements.txt
 ```
 
-`(.venv)` が付けば有効化済み。抜けるときは `deactivate`。初回実行時、YOLOモデルは自動ダウンロードされます。
+`(.venv)` が付けば有効化済み。抜けるときは `deactivate`。初回実行時、検出モデル(既定 `yoloe-11l-seg-pf.pt`、71MB)は自動ダウンロードされます。
 
 鑑定文の生成・読み上げには外部プロセスの **Ollama** と **VOICEVOX** が必要です。
 それぞれインストールして起動しておいてください。セットアップ手順とモデル取得、
@@ -58,4 +58,7 @@ python3 -m backend.server
 | `d` | デバッグ映像のON/OFF |
 
 各モードの詳しい振る舞い・鑑定盤の見方・枠の意匠切り替えは
-[docs/usage.md](docs/usage.md) を参照してください。
+[docs/usage.md](docs/usage.md) を参照してください。鑑定文と読み上げ音声は事前生成して
+ディスクに永続化でき(サーバと同じ環境変数を付けて
+`python3 -m backend.precompute_explain` / `precompute_speak`)、詳細は
+[docs/voice.md](docs/voice.md) を参照してください。

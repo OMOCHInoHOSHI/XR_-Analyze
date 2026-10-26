@@ -18,7 +18,7 @@
 | `CAM_FAIL_LIMIT` | 30 | `grab()` の連続失敗を何回数えたら切断とみなすか。失敗は10ms間隔で数えるため、既定30回は下限0.3秒・おおむね0.3〜1秒程度 |
 | `CAM_RETRY_WAIT` | 1.0 | 再オープンに失敗したときの再試行間隔(秒)。カメラが戻るまで試し続ける |
 | `CALIB_FILE` | ./calib.json | 合わせ込み値(ズーム/位置)の保存先。ブラウザで `s` を押すと書き込まれ、次回起動時に自動で読まれる |
-| `MODEL` | yolov8n.pt | 検出モデル。detection.md「認識できる物体を増やす」参照 |
+| `MODEL` | yoloe-11l-seg-pf.pt | 検出モデル。detection.md「認識できる物体を増やす」参照。既定の経緯は [ADR-0040](adr/0040-default-model-yoloe.md) |
 | `CLASSES` | (未指定) | オープン語彙モデルで検出する物体名(カンマ区切り)。例: `wallet,watch,ring` |
 | `MAX_DET` | 15 | 一度に表示する検出数の上限(信頼度上位N件)。0以下で無制限 |
 | `CONF_THRES` | 0.35 | 信頼度しきい値 |
@@ -34,6 +34,7 @@
 | `OLLAMA_MODEL` | gemma4:e4b-mlx (Apple Silicon) / gemma4:e4b (その他) | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名。Apple Silicon では MLX エンジン版が既定 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `OLLAMA_KEEP_ALIVE` | 30m | 生成後モデルをGPUメモリに残す時間。未ロードからの1回目は実測5〜19秒かかるため長め。`0` で即解放 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `EXPLAIN_TIMEOUT_SEC` | 60.0 | AI説明の生成完了を待つ上限秒。コールド時は実測最大27秒 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
+| `EXPLAIN_CACHE_PATH` | ./explain_cache.json | 鑑定文の永続キャッシュ保存先。起動時に読み込み、新規生成のたびに書き戻す。空文字でプロセス内キャッシュのみに戻す ([ADR-0038](adr/0038-explain-persistent-cache.md)) |
 | `TTS_BACKEND` | voicevox | 鑑定文の読み上げ方式。`voicevox`(VOICEVOX ENGINE) / `say`(macOS同梱コマンド) / `off`(無効) |
 | `VOICEVOX_URL` | http://localhost:50021 | VOICEVOX ENGINE の接続先 |
 | `VOICEVOX_SPEAKER` | 82 | VOICEVOX の話者ID。既定は「青山龍星」のスタイル「不機嫌」。`GET /speakers` で一覧できる |
@@ -43,6 +44,7 @@
 | `TTS_VOICE` | Grandpa | (say専用)読み上げの声。`say -v '?'` で導入済みの声を一覧できる |
 | `TTS_RATE` | 130 | (say専用)読み上げの話速(words/min相当)。say の既定175より遅く、重々しく読ませる |
 | `TTS_TIMEOUT_SEC` | 20.0 | 読み上げの合成完了を待つ上限秒(say/voicevox共通)。実測は1件あたり voicevox 1.3〜2.9秒 / say 約0.5秒 |
+| `SPEAK_CACHE_DIR` | ./speak_cache | 読み上げ音声(WAV)のディスク永続キャッシュの保存先。空文字で無効化(プロセス内の32件LRUのみになる)([ADR-0039](adr/0039-speak-persistent-cache.md)) |
 
 > Apple Silicon(M1〜)では `DEVICE` を指定しなくても自動で `mps`(GPU)が有効に
 > なります。明示的にCPUを使いたい場合のみ `DEVICE=cpu` を指定してください。

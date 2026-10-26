@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import platform
+from pathlib import Path
 
 from .calib_store import calib_path as _calib_path
 from .calib_store import load as _load_saved_view
@@ -117,14 +118,16 @@ if _SAVED_VIEW:
 
 # --- 検出モデル ---
 # 認識できる物体の種類はモデルで決まる:
-#   - yolov8n.pt 等(既定)        : COCO 80カテゴリ。最軽量・最速。
-#   - yoloe-11s-seg-pf.pt 等       : オープン語彙「プロンプトフリー」。LVIS等1200+の
+#   - yoloe-11l-seg-pf.pt (既定)   : オープン語彙「プロンプトフリー」。LVIS等1200+の
 #                                    語彙で、クラス指定なしに見えたモノへ名前を付ける。
-#                                    「専門性不要・モノの名前が分かればいい」用途に最適。
+#                                    鑑定の対象を限定しない用途に合う。s/m は同じ語彙の
+#                                    小型版で、速度優先ならそちら。
 #   - yoloe-11s-seg.pt + CLASSES   : テキスト指定モード。CLASSESで挙げた任意の物体だけ
 #                                    を検出(例: CLASSES="wallet,watch,ring")。
+#   - yolov8n.pt 等                : COCO 80カテゴリ。最軽量・最速だが語彙が狭い。
+# 既定を YOLOE-pf にした理由: docs/adr/0040-default-model-yoloe.md
 # モデル(.pt)は初回に自動ダウンロードされる。
-MODEL: str = os.environ.get("MODEL", "yolov8n.pt")
+MODEL: str = os.environ.get("MODEL", "yoloe-11l-seg-pf.pt")
 
 # オープン語彙(YOLOE/YOLO-World)用: 検出したいクラス名をカンマ区切りで指定。
 # 指定すると set_classes() でそのクラスだけに絞る。空なら未使用
@@ -235,6 +238,16 @@ OLLAMA_KEEP_ALIVE: str = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 # (実測: docs/adr/0036-llm-generation-latency.md)。
 EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 60.0)
 
+# 全ラベル分の鑑定文を事前生成して溜めておく永続キャッシュの保存先(JSON)。
+# COCO/LVISの語彙は有限なので、あらかじめ全件生成しておけばウォーム時でも
+# 約2秒かかる生成(docs/adr/0036-llm-generation-latency.md)を待たずに済む。
+# calib.json と同じ「プロジェクトルート直下」の流儀 (理由: docs/adr/0038-explain-persistent-cache.md)。
+# 空文字にすると永続化を無効化し、プロセス内キャッシュのみで動く。
+EXPLAIN_CACHE_PATH: str = os.environ.get(
+    "EXPLAIN_CACHE_PATH",
+    str(Path(__file__).resolve().parent.parent / "explain_cache.json"),
+).strip()
+
 # --- 読み上げ (TTS) ---
 # 鑑定文を音声で読み上げる。選択肢は
 # "voicevox"(VOICEVOX ENGINE、キャラクター性のある声) /
@@ -264,6 +277,16 @@ TTS_RATE: int = _int("TTS_RATE", 130)
 # 合成完了を待つ上限秒(say / voicevox 共通)。実測は鑑定文1件あたり
 # voicevox が 1.3〜2.9秒(文の長さによる)、say が約0.5秒(初回のみ声の読み込みで約2秒)。
 TTS_TIMEOUT_SEC: float = _float("TTS_TIMEOUT_SEC", 20.0)
+
+# 合成済みWAVをディスクへ永続化する保存先ディレクトリ。プロセス内の
+# `_speak_cache`(32件LRU、server.py)はサーバ再起動で消え、合成には1件
+# 5〜10秒かかるため、ディスクにも残して次回起動や事前合成
+# (`backend/precompute_speak.py`)から使い回せるようにする。空文字なら
+# 永続化を無効にする(既定はリポジトリ直下の calib.json に倣いルート相対)。
+# 容量の目安: WAV(24kHz/16bit/mono)は1件あたり0.5〜1MB程度。COCO 80クラス
+# 全件で40〜70MB程度になる見込み(推定: docs/adr/0039-speak-persistent-cache.md)。
+_DEFAULT_SPEAK_CACHE_DIR = Path(__file__).resolve().parent.parent / "speak_cache"
+SPEAK_CACHE_DIR: str = os.environ.get("SPEAK_CACHE_DIR", str(_DEFAULT_SPEAK_CACHE_DIR))
 
 # --- 終了 ---
 # Ctrl+C を押してから強制的に閉じるまでの秒数。uvicorn は既定で処理中のリクエストを

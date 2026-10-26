@@ -115,6 +115,36 @@ def resolve(names: dict[int, str], policy: str) -> list[int] | None:
     return keep
 
 
+def runtime_labels() -> list[str]:
+    """
+    現在の設定 (MODEL / CLASSES / VOCAB) でサーバが実際に配信しうる英語ラベルを返す。
+
+    鑑定文・読み上げ音声の事前生成 (precompute_explain / precompute_speak) は、
+    この一覧をキーにキャッシュを作る。`/explain` に届くラベルはモデルの語彙名
+    そのもの (LVIS の見出し語ではない。例: LVIS "aerosol can" に対しモデルは
+    "spray can") なので、対訳辞書の見出し語から作るとキャッシュを取り逃がす。
+    detector.py と同じ手順 (CLASSES があればその語彙、無ければ VOCAB で絞る) で
+    求める (理由: docs/adr/0038-explain-persistent-cache.md)。
+
+    モデルの読み込み (数秒) を伴うため、バッチ用途に限る。
+    """
+    from . import config
+
+    if config.CLASSES:
+        # set_classes() 後の names は指定順そのまま。detector と同じくこれ以上は絞らない
+        return list(config.CLASSES)
+
+    from ultralytics import YOLO
+
+    names = YOLO(config.MODEL).names
+    if not isinstance(names, dict):
+        names = dict(enumerate(names))
+    keep = resolve(names, config.VOCAB)
+    if keep is None:
+        keep = sorted(names)
+    return [names[i] for i in keep]
+
+
 def _dump() -> None:
     """
     現在の設定で残る語彙を1行1語で標準出力へ出す。編集の出発点として使う。
