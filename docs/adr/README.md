@@ -56,6 +56,9 @@
 | [0038](0038-explain-persistent-cache.md) | 鑑定文キャッシュをディスクに永続化し、事前生成する | `explain.py` / `server.py` / `precompute_explain.py` |
 | [0039](0039-speak-persistent-cache.md) | 読み上げ音声をディスクへ永続化する | `speak_cache.py` / `server.py` / `precompute_speak.py` / `config.py` |
 | [0040](0040-default-model-yoloe.md) | 既定の検出モデルを YOLOE-pf (yoloe-11l-seg-pf.pt) にする | `config.py` |
+| [0041](0041-windows-camera-support.md) | Windows ではカメラ名を DirectShow で列挙し、MJPG で開く | `devices.py` / `camera.py` / `config.py` |
+| [0042](0042-windows-exe-packaging.md) | Windows 向けに PyInstaller のフォルダ形式で exe を作り、CUDA 版 torch を同梱する | `paths.py` / `packaging/` / `build_exe.ps1` |
+| [0043](0043-startup-selection-screen.md) | 起動画面でカメラと検出モデルを選んでから検出を始める | `server.py` / `startup.py` / `models.py` / `frontend/setup.html` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は

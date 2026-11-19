@@ -14,8 +14,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# backend/ の親 = プロジェクトルート。__file__ 基準でパスを決める (理由: docs/adr/0008-calibration-persistence.md)
-DEFAULT_PATH = Path(__file__).resolve().parent.parent / "calib.json"
+from .paths import DATA_DIR
+
+# 開発時はプロジェクトルート、exe では XRAnalyze.exe の隣
+# (理由: docs/adr/0008-calibration-persistence.md, docs/adr/0042-windows-exe-packaging.md)
+DEFAULT_PATH = DATA_DIR / "calib.json"
 
 # 保存/読込するキー。view() の戻り値と同じ名前で揃えてある。
 _KEYS = ("zoom", "offset_x", "offset_y")

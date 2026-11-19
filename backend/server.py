@@ -2,7 +2,12 @@
 配信サーバ (FastAPI)。
 
 エンドポイント:
-  GET  /            -> フロント(frontend/index.html)があれば配信
+  GET  /            -> フロント(frontend/index.html)。検出を始める前は起動画面(setup.html)
+  GET  /setup       -> 起動画面 (カメラと検出モデルを選んで検出を始める)
+  GET  /setup/options      -> 接続中のカメラ・使える検出モデルの一覧と初期選択
+  GET  /setup/thumb/{index} -> 一覧を作ったときに撮ったカメラの1枚 (JPEG)
+  POST /setup/start        -> 選んだカメラ・モデルで検出を始める
+  GET  /setup/status       -> 起動の進み具合 (selecting / starting / running / error)
   GET  /static/*    -> フロントの静的資源 (style.css / app.js)
   GET  /healthz     -> 稼働確認 + 実測fps
   WS   /ws          -> 検出結果JSONをSTREAM_FPSで配信 (Web/Unity/Android共通の契約)
@@ -11,21 +16,23 @@
   POST /calib       -> 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ)
   POST /calib/save  -> 現在の調整値をファイルへ保存 (次回起動時に自動で復元)
   POST /explain     -> 物体ラベルから日本語の説明文を生成 (Ollama のローカルLLM)
-  POST /speak       -> 鑑定文の読み上げ音声(WAV)を返す (macOS の say)
+  POST /speak       -> 鑑定文の読み上げ音声(WAV)を返す (VOICEVOX / macOS の say)
 
 起動:
   cd "XR_ Analyze"
-  python3 -m backend.server
+  python3 -m backend.server               # 起動画面で選んでから検出を始める
+  python3 -m backend.server --no-select   # 従来どおり環境変数の設定ですぐ始める
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
+import os
 import queue
 import threading
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import cv2
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -33,16 +40,17 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calib_store, config, speak_cache, tts
+from . import calib_store, config, devices, models, speak_cache, startup, tts
 # モジュール名を明示的に別名にするのは、下の /explain ハンドラ関数名が
 # `explain` で、モジュール名とかぶるため(ハンドラ定義でグローバルの
 # `explain` がハンドラ関数自身に上書きされてしまう)。
 from . import explain as explain_mod
 from .detector import Detector
+from .paths import DATA_DIR, FROZEN, RESOURCE_DIR
 from .pipeline import Pipeline
 
 pipeline: Pipeline | None = None
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+FRONTEND_DIR = RESOURCE_DIR / "frontend"
 
 # 終了の合図。Ctrl+C (SIGINT/SIGTERM) を受けた"瞬間"に立てる。/ws (async) と
 # /video (同期ジェネレータ) の両方から読むため threading.Event を使う。
@@ -61,11 +69,19 @@ async def lifespan(app: FastAPI):
     # ファイルが無い/壊れていても explain.load_cache 側で空dictに落として起動を止めない。
     _explain_cache.update(explain_mod.load_cache(config.EXPLAIN_CACHE_PATH))
     print(f"[explain] 永続キャッシュから {len(_explain_cache)} 件を読み込みました")
-    pipeline = Pipeline()
-    pipeline.start()
+    if config.SETUP:
+        # カメラとモデルは起動画面で選ぶ。検出は POST /setup/start から始まる
+        # (理由: docs/adr/0043-startup-selection-screen.md)
+        print(f"[setup] ブラウザで http://{_browser_host()}:{config.PORT}/ を開き、"
+              "カメラと検出モデルを選んでください")
+    else:
+        pipeline = Pipeline()
+        pipeline.start()
+        _startup.mark_running({"cam_index": pipeline.cam_index, "model": pipeline.model})
     try:
         yield
     finally:
+        _startup.cancel()
         if pipeline is not None:
             pipeline.stop()
 
@@ -73,17 +89,31 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="XR Analyze backend", lifespan=lifespan)
 
 
+def _set_pipeline(p: Pipeline) -> None:
+    global pipeline
+    pipeline = p
+
+
+# 起動画面の状態。検出パイプラインはここから組み立てて pipeline に入れる。
+_startup = startup.Startup(
+    pipeline_factory=lambda cam_index, cam_name, model: Pipeline(cam_index, cam_name, model),
+    on_running=_set_pipeline,
+)
+
+
 @app.get("/healthz")
 async def healthz():
     if pipeline is None:
-        return JSONResponse({"status": "starting"}, status_code=503)
+        return JSONResponse(
+            {"status": "starting", "setup": _startup.state}, status_code=503
+        )
     payload = pipeline.detections_payload()
     return {
         "status": "ok",
         "camera_status": payload["camera_status"],
         "fps": payload["fps"],
         "frame_id": payload["frame_id"],
-        "model": config.MODEL,
+        "model": pipeline.model,
         "device": config.DEVICE or "auto",
         "source_size": payload["source_size"],
         "error": payload["error"],
@@ -92,12 +122,105 @@ async def healthz():
 
 @app.get("/")
 async def index():
-    html = FRONTEND_DIR / "index.html"
+    # 検出を始める前は起動画面を出す。始まった後は従来どおりの画面
+    html = FRONTEND_DIR / ("index.html" if pipeline is not None else "setup.html")
     if html.exists():
         return FileResponse(str(html))
     return JSONResponse(
         {"message": "backend running", "ws": "/ws", "video": "/video", "health": "/healthz"}
     )
+
+
+@app.get("/setup")
+async def setup_page():
+    return FileResponse(str(FRONTEND_DIR / "setup.html"))
+
+
+# --- 起動画面 (理由: docs/adr/0043-startup-selection-screen.md) ---
+# 一覧づくりはカメラを1台ずつ開くので数秒かかる。結果は取っておき、
+# 「再読み込み」(refresh=1) のときだけ調べ直す。
+_probe_lock = threading.Lock()
+_probed: list[devices.CameraInfo] | None = None
+
+
+def _probe(refresh: bool) -> list[devices.CameraInfo]:
+    global _probed
+    with _probe_lock:
+        if _probed is None or refresh:
+            print("[setup] 接続中のカメラを調べています...")
+            _probed = devices.probe_cameras(
+                config.CAM_PROBE_MAX, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FOURCC
+            )
+            for c in _probed:
+                size = f"{c.width}x{c.height}" if c.readable else "読み取り失敗"
+                print(f"[setup]   index {c.index}: {c.name or '(名前不明)'} [{size}]")
+            if not _probed:
+                print("[setup]   カメラが見つかりませんでした")
+        return _probed
+
+
+def _default_camera(cams: list[devices.CameraInfo]) -> int | None:
+    """初期選択: CAM_INDEX 明示 > CAM_NAME の名前一致 > 最初に映ったカメラ。"""
+    if not cams:
+        return None
+    indexes = [c.index for c in cams]
+    if config.CAM_INDEX_ENV is not None and config.CAM_INDEX_ENV in indexes:
+        return config.CAM_INDEX_ENV
+    if config.CAM_NAME:
+        for c in cams:
+            if config.CAM_NAME.lower() in c.name.lower():
+                return c.index
+    readable = [c.index for c in cams if c.readable]
+    return readable[0] if readable else indexes[0]
+
+
+@app.get("/setup/options")
+def setup_options(refresh: bool = False):
+    if pipeline is not None or _startup.state == startup.STARTING:
+        # 稼働中・立ち上げ中にカメラを開き直すと、使用中のカメラを奪い合う
+        return JSONResponse(_startup.status(), status_code=409)
+    cams = _probe(refresh)
+    return {
+        "cameras": [c.to_dict() for c in cams],
+        "models": [m.to_dict() for m in models.list_models(config.MODEL)],
+        "default": {"cam_index": _default_camera(cams), "model": config.MODEL},
+        "device": config.DEVICE or "auto",
+        "model_dir": str(DATA_DIR),
+        **_startup.status(),
+    }
+
+
+@app.get("/setup/thumb/{index}")
+def setup_thumb(index: int):
+    for c in _probed or []:
+        if c.index == index and c.thumbnail is not None:
+            return Response(content=c.thumbnail, media_type="image/jpeg",
+                            headers={"Cache-Control": "no-store"})
+    raise HTTPException(status_code=404, detail="no thumbnail")
+
+
+class SetupRequest(BaseModel):
+    cam_index: int
+    model: str
+
+
+@app.post("/setup/start")
+def setup_start(req: SetupRequest):
+    model = req.model.strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="モデルを選んでください")
+    names = {c.index: c.name for c in _probed or []}
+    # 一覧づくりとカメラの取り合いにならないよう、調べている最中なら待ってから始める
+    with _probe_lock:
+        started = _startup.start(req.cam_index, names.get(req.cam_index, ""), model)
+    if not started:
+        return JSONResponse(_startup.status(), status_code=409)
+    return _startup.status()
+
+
+@app.get("/setup/status")
+async def setup_status():
+    return _startup.status()
 
 
 # フロントの静的資源 (style.css / app.js) の配信。index.html だけは上の / から
@@ -538,10 +661,51 @@ async def video(annotate: bool = True):
     )
 
 
-def main() -> None:
+def _browser_host() -> str:
+    # 0.0.0.0 などで全体に公開していても、自分のブラウザからは 127.0.0.1 で開ける
+    return "127.0.0.1" if config.HOST in ("0.0.0.0", "::", "") else config.HOST
+
+
+def _open_browser_when_ready(server) -> None:
+    """サーバが接続を受け付け始めたらブラウザで画面を開く (exe の既定動作)。"""
+    import webbrowser
+
+    def wait_and_open() -> None:
+        deadline = time.time() + 60
+        while not server.started and time.time() < deadline:
+            if server.should_exit:
+                return
+            time.sleep(0.1)
+        if server.started:
+            webbrowser.open(f"http://{_browser_host()}:{config.PORT}/")
+
+    threading.Thread(target=wait_and_open, daemon=True).start()
+
+
+def main(argv: list[str] | None = None) -> None:
     import uvicorn
 
-    print(f"[XR Analyze] http://{config.HOST}:{config.PORT}  (model={config.MODEL})")
+    ap = argparse.ArgumentParser(description="XR Analyze backend")
+    ap.add_argument("--no-select", action="store_true",
+                    help="起動画面を出さず、環境変数の設定 (CAM_INDEX/MODEL など) ですぐ検出を始める")
+    ap.add_argument("--no-browser", action="store_true", help="起動後にブラウザを開かない")
+    ap.add_argument("--open-browser", action="store_true", help="起動後にブラウザを開く")
+    args = ap.parse_args(argv)
+    if args.no_select:
+        config.SETUP = False
+    if args.no_browser:
+        config.OPEN_BROWSER = False
+    elif args.open_browser:
+        config.OPEN_BROWSER = True
+
+    if FROZEN:
+        # 名前だけで指定したモデルを ultralytics がカレントへダウンロードするので、
+        # exe の隣 (DATA_DIR) をカレントにして保存先をそろえる
+        # (理由: docs/adr/0042-windows-exe-packaging.md)
+        os.chdir(DATA_DIR)
+
+    model_note = "起動画面で選択" if config.SETUP else config.MODEL
+    print(f"[XR Analyze] http://{_browser_host()}:{config.PORT}  (model={model_note})")
     # timeout_graceful_shutdown を渡さないと、Ctrl+C のあと処理中の /explain や
     # /speak が終わるまで待ち続ける (理由: docs/adr/0032-prompt-shutdown.md)。
     # これは保険として残す。/ws・/video が何らかの理由で自分から抜けられなかった
@@ -567,6 +731,8 @@ def main() -> None:
         original_handle_exit(sig, frame)
 
     server.handle_exit = handle_exit
+    if config.OPEN_BROWSER:
+        _open_browser_when_ready(server)
     try:
         server.run()
     except KeyboardInterrupt:

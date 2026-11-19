@@ -1,0 +1,3 @@
+# Windows 用のスクリプトと exe 同梱の説明書は CRLF で持つ
+*.ps1 text eol=crlf
+packaging/*.txt text eol=crlf

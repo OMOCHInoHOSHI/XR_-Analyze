@@ -20,26 +20,48 @@ from typing import Optional
 
 import numpy as np
 
-from . import config
+from . import config, models
 from .camera import Camera, reconnect_candidates, select_camera_index
 from .detector import Detection, Detector, render_notice_frame
 from .stabilizer import DetectionStabilizer
 
 
 class Pipeline:
-    def __init__(self) -> None:
-        index, reason = select_camera_index(
-            config.CAM_INDEX_ENV, config.CAM_NAME, config.CAM_INDEX
-        )
+    def __init__(
+        self,
+        cam_index: Optional[int] = None,
+        cam_name: str = "",
+        model: Optional[str] = None,
+    ) -> None:
+        """
+        cam_index / model を渡すと、環境変数による選択より優先してそれを使う
+        (起動画面で選んだ値。理由: docs/adr/0043-startup-selection-screen.md)。
+        cam_name は選んだカメラの名前で、再接続時に index がずれても名前で追従する
+        のに使う。名前が分からない (空文字) なら、選んだ index だけを試す。
+        """
+        if cam_index is None:
+            index, reason = select_camera_index(
+                config.CAM_INDEX_ENV, config.CAM_NAME, config.CAM_INDEX
+            )
+            # 再接続の候補の決め方は従来どおり環境変数に従う
+            self._reconnect_explicit = config.CAM_INDEX_ENV
+            self._reconnect_name = config.CAM_NAME
+        else:
+            index = cam_index
+            reason = f"起動画面で選択 -> index {index}" + (f" ({cam_name})" if cam_name else "")
+            self._reconnect_explicit = None if cam_name else cam_index
+            self._reconnect_name = cam_name
         self.cam_index = index
         self.cam_reason = reason
+        self.model = model or config.MODEL
         print(f"[camera] {reason}")
         self._camera = Camera(
             index, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FPS,
             config.CAM_FLIP, config.CAM_ZOOM, config.CAM_OFFSET_X, config.CAM_OFFSET_Y,
+            fourcc=config.CAM_FOURCC,
         )
         self._detector = Detector(
-            config.MODEL, config.CONF_THRES, config.IOU_THRES,
+            models.resolve(self.model), config.CONF_THRES, config.IOU_THRES,
             config.IMG_SIZE, config.DEVICE, config.CLASSES,
             max_det=config.MAX_DET, fast=config.FAST_INFER,
             dedup_iou=config.DEDUP_IOU, vocab_policy=config.VOCAB,
@@ -209,7 +231,9 @@ class Pipeline:
         index がずれても名前で追従できる (理由: docs/adr/0035-camera-auto-reconnect.md)
         """
         self._camera.release()
-        for idx in reconnect_candidates(self.cam_index, config.CAM_INDEX_ENV, config.CAM_NAME):
+        for idx in reconnect_candidates(
+            self.cam_index, self._reconnect_explicit, self._reconnect_name
+        ):
             self._camera.index = idx
             if self._camera.try_open():
                 self.cam_index = idx

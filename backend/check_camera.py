@@ -48,6 +48,7 @@ def main() -> None:
     with Camera(
         index, config.CAM_WIDTH, config.CAM_HEIGHT, config.CAM_FPS, config.CAM_FLIP,
         config.CAM_ZOOM, config.CAM_OFFSET_X, config.CAM_OFFSET_Y,
+        fourcc=config.CAM_FOURCC,
     ) as cam:
         print(f"camera size = {cam.actual_size}, index = {index}")
         last = time.time()

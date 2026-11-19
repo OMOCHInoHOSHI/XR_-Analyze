@@ -1,0 +1,5 @@
+# exe のビルド用 (Windows)。build_exe.ps1 が使う。実行時には不要。
+# 導入: .venv\Scripts\pip install -r backend/requirements-build.txt
+# torch / torchvision は CUDA 版を先に入れておくこと (docs/windows.md)。
+-r requirements.txt
+pyinstaller>=6.10

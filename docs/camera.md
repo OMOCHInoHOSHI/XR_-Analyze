@@ -5,10 +5,16 @@
 
 ## 0. どのカメラが使われるか確認 (内蔵 vs InnoMaker)
 
-既定で **名前一致 `CAM_NAME=Innomaker` により外付けを自動選択**します。これを
-macOSで正しく機能させるには `pyobjc-framework-AVFoundation` (requirements.txt 同梱)
-が必要です。未導入時は名前選択が効かないため `CAM_INDEX` を明示してください。
-(選択順序の設計判断: [ADR-0005](adr/0005-camera-selection.md))
+サーバを起動すると、まずブラウザに**起動画面**が出て、接続中のカメラが名前・
+解像度・縮小画像つきで並びます。そこで選べば、番号を調べる必要はありません
+([ADR-0043](adr/0043-startup-selection-screen.md))。
+
+起動画面の初期選択と、`--no-select` で起動したときの選択は、既定で
+**名前一致 `CAM_NAME=Innomaker` により外付けを自動選択**します。名前の取得には
+macOS では `pyobjc-framework-AVFoundation`、Windows では `pygrabber` (どちらも
+requirements.txt 同梱) が必要です。未導入時は名前選択が効かないため `CAM_INDEX` を
+明示してください。
+(選択順序の設計判断: [ADR-0005](adr/0005-camera-selection.md)、Windows: [ADR-0041](adr/0041-windows-camera-support.md))
 
 確認:
 
@@ -16,7 +22,7 @@ macOSで正しく機能させるには `pyobjc-framework-AVFoundation` (requirem
 python3 -m backend.list_cameras
 ```
 
-AVFoundation(=OpenCVのindex順)のカメラ名・各 index の実解像度・選ばれる番号を表示。
+OpenCVのindex順のカメラ名 (macOS は AVFoundation、Windows は DirectShow)・各 index の実解像度・選ばれる番号を表示。
 最終確認は check_camera で実映像を見るのが確実です:
 
 ```bash

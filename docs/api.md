@@ -7,8 +7,13 @@
 
 | メソッド | パス | 内容 |
 |---|---|---|
-| GET | `/` | フロント(`frontend/index.html`)があれば配信 |
-| GET | `/healthz` | 稼働確認 + 実測fps + カメラの状態 (`camera_status`) |
+| GET | `/` | フロント(`frontend/index.html`)。検出を始める前は起動画面(`frontend/setup.html`) |
+| GET | `/setup` | 起動画面 (カメラと検出モデルを選んで検出を始める) |
+| GET | `/setup/options` | 接続中のカメラ・使える検出モデルの一覧と初期選択。`?refresh=1` でカメラを調べ直す。検出の稼働中・立ち上げ中は 409 |
+| GET | `/setup/thumb/{index}` | 一覧を作ったときに撮ったカメラの縮小画像 (JPEG) |
+| POST | `/setup/start` | `{"cam_index": 0, "model": "yoloe-11l-seg-pf.pt"}` で検出を始める。既に立ち上げ中・稼働中なら 409 |
+| GET | `/setup/status` | 立ち上げの進み具合。`state` は `selecting` / `starting` / `running` / `error` (`message` に理由) |
+| GET | `/healthz` | 稼働確認 + 実測fps + カメラの状態 (`camera_status`)。検出を始める前は 503 で `setup` に起動画面の状態 |
 | WS | `/ws` | 検出結果JSONを `STREAM_FPS` で配信 (Web/Unity/Android共通の契約) |
 | GET | `/video` | 注釈付きMJPEG (デバッグ確認用。ブラウザで直接開ける)。`?annotate=0` で枠を焼き込まない素の映像 (フロントはこちらを使う) |
 | POST | `/calib` | 稼働中のズーム/切り抜き位置の調整 (グラスの視界合わせ) |
@@ -19,6 +24,10 @@
 `/video` は単体で開く分は既定 (注釈付き) のままでよく、枠が二重になることはありません。
 トップページが `?annotate=0` を使うのは、枠をページ側で描くためです。
 `/healthz` はブラウザで開けば fps や `camera_status` などの稼働状況をそのまま読めます。
+
+起動画面 (`/setup/*`) の流れと理由は [ADR-0043](adr/0043-startup-selection-screen.md)。
+`--no-select` (または `SETUP=0`) で起動した場合、検出は起動と同時に始まり、`/setup/status` は
+最初から `running` を返します。
 
 ## WebSocket の出力フォーマット (クライアント非依存の契約)
 
