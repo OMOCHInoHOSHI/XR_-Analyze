@@ -9,7 +9,10 @@ const els = {
   form: $("s-form"),
   refresh: $("s-refresh"),
   camNote: $("s-cam-note"),
-  cams: $("s-cams"),
+  cam: $("s-cam"),
+  preview: $("s-preview"),
+  thumb: $("s-thumb"),
+  thumbMeta: $("s-thumb-meta"),
   models: $("s-models"),
   modelNote: $("s-model-note"),
   custom: $("s-custom"),
@@ -32,51 +35,55 @@ function setStatus(text, kind) {
   els.status.className = "s-status" + (kind ? " " + kind : "");
 }
 
+let cameras = [];     // /setup/options の cameras。ドロップダウンの並びと同じ順
+let thumbStamp = 0;   // 縮小画像のキャッシュ避け。一覧を作り直すたびに変える
+
 function setBusy(busy) {
-  els.start.disabled = busy || !els.cams.querySelector("input:checked");
+  els.start.disabled = busy || !els.cam.value;
   els.refresh.disabled = busy;
+  els.cam.disabled = busy || !cameras.length;
   for (const input of els.form.querySelectorAll("input")) input.disabled = busy;
 }
 
+function cameraLabel(c) {
+  const name = c.name || `カメラ ${c.index}`;
+  const size = c.readable ? `${c.width}×${c.height}` : "読み取れない";
+  return `${name}  (index ${c.index} ・ ${size})`;
+}
+
+// ドロップダウンで選んでいるカメラの縮小画像と説明を出す
+function showPreview() {
+  const c = cameras.find((x) => String(x.index) === els.cam.value);
+  els.preview.hidden = !c;
+  if (!c) return;
+  els.thumb.hidden = !c.has_thumbnail;
+  if (c.has_thumbnail) els.thumb.src = `/setup/thumb/${c.index}?t=${thumbStamp}`;
+  els.thumbMeta.textContent = c.has_thumbnail
+    ? "一覧を作った時点の1枚"
+    : "映像を取得できませんでした (開けたが読み取れないカメラです)";
+  els.thumbMeta.className = c.has_thumbnail ? "" : "warn";
+}
+
 function renderCameras(cams, defaultIndex) {
-  els.cams.replaceChildren();
+  cameras = cams;
+  thumbStamp = Date.now();
+  els.cam.replaceChildren();
   if (!cams.length) {
     els.camNote.textContent =
       "カメラが見つかりませんでした。接続を確かめて「再読み込み」を押してください。";
     els.camNote.className = "s-note err";
+    showPreview();
     return;
   }
-  els.camNote.textContent = "使うカメラを選んでください。画像は一覧を作った時点の1枚です。";
+  els.camNote.textContent = "使うカメラを選んでください。";
   els.camNote.className = "s-note";
-  const stamp = Date.now();
   for (const c of cams) {
-    const label = el("label", "s-cam");
-    const input = el("input");
-    input.type = "radio";
-    input.name = "camera";
-    input.value = String(c.index);
-    input.checked = c.index === defaultIndex;
-    input.addEventListener("change", () => setBusy(false));
-    label.append(input);
-
-    if (c.has_thumbnail) {
-      const img = el("img", "s-cam-thumb");
-      img.alt = "";
-      img.src = `/setup/thumb/${c.index}?t=${stamp}`;
-      label.append(img);
-    } else {
-      label.append(el("span", "s-cam-nothumb", "映像を取得できませんでした"));
-    }
-
-    const body = el("span", "s-cam-body");
-    body.append(el("span", "s-cam-name", c.name || `カメラ ${c.index}`));
-    const meta = c.readable
-      ? `index ${c.index} ・ ${c.width}×${c.height}`
-      : `index ${c.index} ・ 開けたが読み取れない`;
-    body.append(el("span", "s-cam-meta" + (c.readable ? "" : " warn"), meta));
-    label.append(body);
-    els.cams.append(label);
+    const opt = el("option", "", cameraLabel(c));
+    opt.value = String(c.index);
+    opt.selected = c.index === defaultIndex;
+    els.cam.append(opt);
   }
+  showPreview();
 }
 
 function renderModels(models, defaultModel) {
@@ -177,7 +184,7 @@ async function poll() {
 
 els.form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const cam = els.form.querySelector('input[name="camera"]:checked');
+  const cam = els.cam.value;
   const model = chosenModel();
   if (!cam) return setStatus("カメラを選んでください", "err");
   if (!model) return setStatus("モデルを選んでください", "err");
@@ -187,7 +194,7 @@ els.form.addEventListener("submit", async (ev) => {
     const res = await fetch("/setup/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cam_index: Number(cam.value), model }),
+      body: JSON.stringify({ cam_index: Number(cam), model }),
     });
     const data = await res.json();
     if (!res.ok && res.status !== 409) {
@@ -202,6 +209,7 @@ els.form.addEventListener("submit", async (ev) => {
 });
 
 els.refresh.addEventListener("click", () => loadOptions(true));
+els.cam.addEventListener("change", () => { showPreview(); setBusy(false); });
 // 「その他」の欄に打ち込み始めたら、その選択肢を選んだことにする
 els.custom.addEventListener("input", () => { els.customRadio.checked = true; });
 

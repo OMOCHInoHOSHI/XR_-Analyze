@@ -42,22 +42,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--c); outline
   padding: 3px 12px; font-size: 13px; }
 .s-sub-btn:hover:not(:disabled) { border-color: var(--c); }
 
-/* --- カメラ --- */
-.s-cams { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-.s-cam { position: relative; display: block; border: 1px solid var(--line);
-  background: var(--panel); cursor: pointer; }
-.s-cam input { position: absolute; opacity: 0; pointer-events: none; }
-.s-cam-thumb { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
-  background: #050a07; border-bottom: 1px solid var(--line); }
-.s-cam-nothumb { display: flex; align-items: center; justify-content: center;
-  width: 100%; aspect-ratio: 16 / 9; color: var(--dim); font-size: 13px;
-  border-bottom: 1px solid var(--line); }
-.s-cam-body { display: block; padding: 8px 10px; }
-.s-cam-name { display: block; font-weight: 700; overflow-wrap: anywhere; }
-.s-cam-meta { display: block; color: var(--dim); font-size: 12px; }
-.s-cam-meta.warn { color: var(--warn); }
-.s-cam:has(input:checked) { border-color: var(--c); box-shadow: 0 0 0 1px var(--c) inset; }
-.s-cam:has(input:focus-visible) { outline: 2px solid var(--c); outline-offset: 2px; }
+/* --- カメラ (ドロップダウン + 選択中のカメラの縮小画像) --- */
+.s-select { width: 100%; max-width: 560px; padding: 8px 10px; font: inherit;
+  background: #020604; color: var(--fg); border: 1px solid var(--c); }
+.s-select option { background: #020604; color: var(--fg); }
+.s-select:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+.s-preview { margin: 10px 0 0; width: 100%; max-width: 360px;
+  border: 1px solid var(--line); background: var(--panel); }
+.s-preview img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
+  background: #050a07; }
+.s-preview img[hidden] { display: none; }
+.s-preview figcaption { padding: 4px 10px; color: var(--dim); font-size: 12px;
+  border-top: 1px solid var(--line); }
+.s-preview figcaption.warn { color: var(--warn); }
 
 /* --- モデル --- */
 .s-models { display: grid; gap: 6px; }

@@ -28,18 +28,43 @@ if ($torchInfo -match " cpu$") {
     throw "CPU 版の torch が入っています。CUDA 版を入れてからビルドしてください (docs/windows.md)。"
 }
 
+$out = "dist\XRAnalyze"
+if (Get-Process XRAnalyze -ErrorAction SilentlyContinue) {
+    throw "XRAnalyze.exe が起動中です。閉じてからビルドしてください。"
+}
+
+# PyInstaller は dist\XRAnalyze を丸ごと消して作り直す。exe の隣に溜まった利用者の
+# データ (調整値・キャッシュ・ダウンロードしたモデル・ログ) は退避して戻す。
+$keepNames = @("calib.json", "explain_cache.json", "speak_cache", "*.pt", "XRAnalyze*.log")
+$keep = "build\_keep"
+if (Test-Path $keep) { Remove-Item $keep -Recurse -Force }
+New-Item -ItemType Directory -Force $keep | Out-Null
+if (Test-Path $out) {
+    foreach ($name in $keepNames) {
+        Get-ChildItem (Join-Path $out $name) -ErrorAction SilentlyContinue |
+            ForEach-Object { Move-Item $_.FullName $keep }
+    }
+}
+
 # PyInstaller は進捗を stderr に出す。Windows PowerShell 5.1 は出力をリダイレクト
 # していると stderr の行をエラー扱いにし、Stop だとそこで止まるので、成否は終了コードで見る。
 $ErrorActionPreference = "Continue"
 & $Python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging\XRAnalyze.spec
 $code = $LASTEXITCODE
 $ErrorActionPreference = "Stop"
-if ($code -ne 0) { throw "PyInstaller が失敗しました (終了コード $code)。" }
+if ($code -ne 0) {
+    throw "PyInstaller が失敗しました (終了コード $code)。退避したデータは $keep にあります。"
+}
 
-$out = "dist\XRAnalyze"
 # 書き換えるデータは exe の隣に置く (backend/paths.py の DATA_DIR)。
 # 事前生成した鑑定文は初回から使えるよう同梱する (docs/adr/0038-explain-persistent-cache.md)。
+# 退避したものがあればそちらを戻す (使ううちに増えた鑑定文を消さないため)。
 Copy-Item explain_cache.json $out -Force
+Get-ChildItem $keep | ForEach-Object {
+    Write-Host "[build] 前回のデータを戻す: $($_.Name)"
+    Move-Item $_.FullName $out -Force
+}
+Remove-Item $keep -Recurse -Force
 Copy-Item packaging\README_exe.txt (Join-Path $out "README.txt") -Force
 if ($IncludeModels) {
     Get-ChildItem *.pt | ForEach-Object {

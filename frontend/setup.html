@@ -23,7 +23,12 @@
         <button type="button" id="s-refresh" class="s-sub-btn">再読み込み</button>
       </div>
       <p class="s-note" id="s-cam-note">接続中のカメラを調べています...</p>
-      <div class="s-cams" id="s-cams" role="radiogroup" aria-labelledby="h-cam"></div>
+      <select id="s-cam" class="s-select" aria-labelledby="h-cam" disabled></select>
+      <!-- 選んでいるカメラの見分け用。一覧を作った時点の1枚 -->
+      <figure class="s-preview" id="s-preview" hidden>
+        <img id="s-thumb" alt="" />
+        <figcaption id="s-thumb-meta"></figcaption>
+      </figure>
     </section>
 
     <section class="s-sec" aria-labelledby="h-model">
