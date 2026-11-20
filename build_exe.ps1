@@ -57,12 +57,23 @@ if ($code -ne 0) {
 }
 
 # 書き換えるデータは exe の隣に置く (backend/paths.py の DATA_DIR)。
-# 事前生成した鑑定文は初回から使えるよう同梱する (docs/adr/0038-explain-persistent-cache.md)。
-# 退避したものがあればそちらを戻す (使ううちに増えた鑑定文を消さないため)。
+# リポジトリにある鑑定文・読み上げ音声のキャッシュと調整値は初回から使えるよう同梱する
+# (docs/adr/0038-explain-persistent-cache.md)。
+# 退避したものがあればそちらを優先して戻す (使ううちに増えたキャッシュや調整値を消さないため)。
 Copy-Item explain_cache.json $out -Force
+if (Test-Path speak_cache) { Copy-Item speak_cache $out -Recurse -Force }
+if (Test-Path calib.json) { Copy-Item calib.json $out -Force }
 Get-ChildItem $keep | ForEach-Object {
     Write-Host "[build] 前回のデータを戻す: $($_.Name)"
-    Move-Item $_.FullName $out -Force
+    $dest = Join-Path $out $_.Name
+    if ($_.PSIsContainer -and (Test-Path $dest)) {
+        # Move-Item はフォルダを既存のフォルダへ統合できないので、中身を上書きコピーする。
+        # speak_cache はリポジトリの分と前回の分を合わせたものになる。
+        Copy-Item (Join-Path $_.FullName "*") $dest -Recurse -Force
+        Remove-Item $_.FullName -Recurse -Force
+    } else {
+        Move-Item $_.FullName $out -Force
+    }
 }
 Remove-Item $keep -Recurse -Force
 Copy-Item packaging\README_exe.txt (Join-Path $out "README.txt") -Force

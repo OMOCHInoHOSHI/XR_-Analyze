@@ -68,6 +68,8 @@ B の venv に、ビルド用の依存を足してからスクリプトを実行
 ```
 
 - CPU 版の torch が入っているとビルドを止めます (GPU のある PC でも CPU 推論になるため)。
+- リポジトリにある `explain_cache.json`・`speak_cache\`・`calib.json` を exe の隣へ同梱します。
+  再ビルドでは前回 exe の隣にあったものを優先し、`speak_cache\` は両方を合わせます。
 - できあがる `dist\XRAnalyze\` は数 GB あります (大半は CUDA 版 torch)。配布は
   フォルダごと zip にします。
 - 単一の exe ではなくフォルダ形式にした理由、torch に CUDA 13.0 版を選んだ理由
