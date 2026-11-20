@@ -1,29 +1,29 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
-# YOLO weights (auto-downloaded)
-*.pt
-
-# CoreML への書き出し(compare_coreml の出力。再生成可能で60MBある)
-*.mlpackage
-
-# 語彙ダンプ(dump_vocab の出力。再生成可能)
-vocab.json
-vocab_untranslated.json
-
-# カメラ合わせ込みの保存値(サーバ画面の 's' キー出力。機材・装着位置ごとに異なる)
-calib.json
-calib.json.tmp
-
-# 鑑定文の永続キャッシュ書き込み中の一時ファイル(atomic replace の中間生成物。
-# explain_cache.json 自体はコミット対象。理由: docs/adr/0038-explain-persistent-cache.md)
-explain_cache.json.tmp
-# 読み上げ音声の永続キャッシュ(合成済みWAV。再生成可能だがバイナリで大きい)
-speak_cache/
-
-# OS
-.DS_Store
-Thumbs.db
+# # Python
+# __pycache__/
+# *.py[cod]
+# .venv/
+# venv/
+#
+# # YOLO weights (auto-downloaded)
+# *.pt
+#
+# # CoreML への書き出し(compare_coreml の出力。再生成可能で60MBある)
+# *.mlpackage
+#
+# # 語彙ダンプ(dump_vocab の出力。再生成可能)
+# vocab.json
+# vocab_untranslated.json
+#
+# # カメラ合わせ込みの保存値(サーバ画面の 's' キー出力。機材・装着位置ごとに異なる)
+# calib.json
+# calib.json.tmp
+#
+# # 鑑定文の永続キャッシュ書き込み中の一時ファイル(atomic replace の中間生成物。
+# # explain_cache.json 自体はコミット対象。理由: docs/adr/0038-explain-persistent-cache.md)
+# explain_cache.json.tmp
+# # 読み上げ音声の永続キャッシュ(合成済みWAV。再生成可能だがバイナリで大きい)
+# speak_cache/
+#
+# # OS
+# .DS_Store
+# Thumbs.db
