@@ -59,6 +59,7 @@
 | [0041](0041-windows-camera-support.md) | Windows ではカメラ名を DirectShow で列挙し、MJPG で開く | `devices.py` / `camera.py` / `config.py` |
 | [0042](0042-windows-exe-packaging.md) | Windows 向けに PyInstaller のフォルダ形式で exe を作り、CUDA 版 torch を同梱する | `paths.py` / `packaging/` / `build_exe.ps1` |
 | [0043](0043-startup-selection-screen.md) | 起動画面でカメラと検出モデルを選んでから検出を始める | `server.py` / `startup.py` / `models.py` / `frontend/setup.html` |
+| [0044](0044-zip-bootstrap-launcher.md) | Download ZIP からは exe でなく起動用 .bat で動かし、依存は初回に取得する | `XRAnalyze.bat` / `packaging/bootstrap.ps1` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は

@@ -20,6 +20,10 @@ explain_cache.json.tmp
 build/
 dist/
 
+# exe / XRAnalyze.bat の実行ログ (packaging/launcher.py が書く)
+XRAnalyze.log
+XRAnalyze.prev.log
+
 # OS
 .DS_Store
 Thumbs.db

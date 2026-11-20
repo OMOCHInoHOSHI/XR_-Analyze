@@ -19,13 +19,16 @@ XR_ Analyze/
 ├── docs/       使い方・設定・APIなどのドキュメント (docs/adr/ に設計判断の記録)
 ├── packaging/  Windows 向け exe の設定 (build_exe.ps1 で使う)
 ├── build_exe.ps1  exe のビルド (docs/windows.md)
+├── XRAnalyze.bat  Windows でダブルクリックして起動 (docs/windows.md)
 └── README.md
 ```
 
 ## インストール方法
 
-**Windows で exe を使う場合**は Python の準備は要りません。`XRAnalyze.exe` を
-ダブルクリックするだけです。exe の使い方・作り方と、Windows で GPU (CUDA) を使う
+**Windows では**、GitHub の develop ブランチを Download ZIP して展開し、
+`XRAnalyze.bat` をダブルクリックするだけで起動できます (初回だけ Python と依存を
+自動で取得します)。ビルド済みの `XRAnalyze.exe` があれば、それをダブルクリックしても
+構いません。exe の使い方・作り方と、Windows で GPU (CUDA) を使う
 venv の作り方は [docs/windows.md](docs/windows.md) を参照してください。
 
 Python 3.9+ を推奨。

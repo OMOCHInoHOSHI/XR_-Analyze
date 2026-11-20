@@ -76,6 +76,10 @@ def _setup_log():
 
 
 def _run() -> int:
+    if not getattr(sys, "frozen", False):
+        # ソースから起動したとき (XRAnalyze.bat → bootstrap.ps1) は、スクリプトの
+        # フォルダ (packaging/) しか import 先に入らないので、リポジトリのルートを足す
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
         # import も try の中に置く。依存の読み込み失敗 (DLL が見つからない等) でも
         # 窓をすぐ閉じず、理由を読めるようにするため
