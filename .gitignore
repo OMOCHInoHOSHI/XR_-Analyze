@@ -1,28 +1,20 @@
-# Python
+# このブランチは Windows へコピーしてそのまま使うため、キャッシュ・モデル・
+# 語彙・カメラ合わせ込み値(speak_cache/, *.pt, vocab*.json, calib.json)も
+# コミット対象にしている。除外するのは OS や Python 環境に依存して使い回せないものだけ。
+
+# Python(仮想環境やバイトコードは OS ごとに作り直す)
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+.pytest_cache/
 
-# YOLO weights (auto-downloaded)
-*.pt
-
-# CoreML への書き出し(compare_coreml の出力。再生成可能で60MBある)
+# CoreML への書き出し(compare_coreml の出力。macOS 専用で60MBある)
 *.mlpackage
 
-# 語彙ダンプ(dump_vocab の出力。再生成可能)
-vocab.json
-vocab_untranslated.json
-
-# カメラ合わせ込みの保存値(サーバ画面の 's' キー出力。機材・装着位置ごとに異なる)
-calib.json
+# 書き込み途中の一時ファイル(atomic replace の中間生成物)
 calib.json.tmp
-
-# 鑑定文の永続キャッシュ書き込み中の一時ファイル(atomic replace の中間生成物。
-# explain_cache.json 自体はコミット対象。理由: docs/adr/0038-explain-persistent-cache.md)
 explain_cache.json.tmp
-# 読み上げ音声の永続キャッシュ(合成済みWAV。再生成可能だがバイナリで大きい)
-speak_cache/
 
 # OS
 .DS_Store

@@ -1,0 +1,3 @@
+# Windows の core.autocrlf で改行変換されないよう、バイナリを明示する
+*.wav binary
+*.pt binary
