@@ -32,6 +32,8 @@
 | `uvicorn[standard]` | 0.49.0 | >=0.29.0 | ASGI サーバ。終了処理に手を入れている | [ADR-0032](adr/0032-prompt-shutdown.md), [ADR-0034](adr/0034-streams-close-themselves.md) |
 | `websockets` | 16.0 | >=12.0 | WebSocket の実装 (uvicorn が使う) | — |
 | `pyobjc-framework-AVFoundation` | 12.2.1 | >=10.0 (macOSのみ) | カメラ名を OpenCV と同じ並び順で取得し、`CAM_NAME` で選ぶ | [ADR-0005](adr/0005-camera-selection.md) |
+| `pygrabber` | 0.2 | >=0.2 (Windowsのみ) | カメラ名を DirectShow (OpenCV と同じ並び順) で取得する | [ADR-0041](adr/0041-windows-camera-support.md) |
+| `pyinstaller` | 6.22.3 | >=6.10 (ビルド時のみ) | Windows 向け exe の組み立て (`requirements-build.txt`) | [ADR-0042](adr/0042-windows-exe-packaging.md) |
 
 `pydantic` (2.13.4) と `starlette` (1.3.1) は FastAPI が連れてくる。`pillow`・
 `matplotlib`・`PyYAML` は ultralytics の依存で、こちらから直接は使っていない。
@@ -100,6 +102,9 @@ XR グラスに映す 1 枚の画面が目的であり、画面遷移も状態�
   が真で、推論は自動的に MPS (GPU) を使う ([ADR-0009](adr/0009-inference-device-selection.md))
 - カメラ取得は Mac / Windows / Linux で切り替わる ([ADR-0005](adr/0005-camera-selection.md))
   が、読み上げの `say` 経路と VOICEVOX の GPU 非対応は macOS 前提の話になる
+- **Windows 11 / NVIDIA RTX 3060 / Python 3.13.5** でも動作を確認している。torch は
+  CUDA 13.0 版 (2.14.1+cu130) を入れ、推論は自動的に CUDA を使う。exe はこの環境で
+  ビルドしている ([windows.md](windows.md), [ADR-0042](adr/0042-windows-exe-packaging.md))
 - リポジトリは backend / frontend / docs を 1 つに収めた単一構成
   ([ADR-0001](adr/0001-monorepo-layout.md))
 

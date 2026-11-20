@@ -1,0 +1,91 @@
+/* 起動画面。本画面 (style.css) と同じ黒地・緑の意匠に揃える。
+   ここはグラス越しでなく手元の画面で操作する前提なので、文字は大きめ・
+   スクロール可にしてある。 */
+:root {
+  --bg: #000;
+  --fg: #d8ffe6;
+  --c: #00ff66;
+  --dim: rgba(216, 255, 230, .55);
+  --line: rgba(0, 255, 102, .35);
+  --panel: rgba(0, 24, 14, .6);
+  --warn: #ffcc00;
+  --err: #ff6b6b;
+  --face: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic",
+    Meiryo, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--face); font-size: 15px; line-height: 1.6; }
+
+#setup { max-width: 960px; margin: 0 auto; padding: 24px 16px 40px; }
+
+.s-head { display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 8px 24px;
+  border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 18px; }
+.s-head h1 { margin: 0; font-size: 22px; letter-spacing: .08em; color: var(--c); }
+.s-head h1 span { margin-left: 10px; font-size: 15px; letter-spacing: .4em; color: var(--fg); }
+.s-device { margin: 0; color: var(--dim); font-size: 13px; }
+
+.s-sec { margin-bottom: 22px; }
+.s-sec-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 8px; }
+.s-sec-head h2 { margin: 0; font-size: 16px; letter-spacing: .2em; color: var(--c); }
+.s-note { margin: 4px 0 10px; color: var(--dim); font-size: 13px; }
+.s-note.err { color: var(--err); }
+
+button { font: inherit; cursor: pointer; }
+button:disabled { cursor: default; opacity: .45; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+
+.s-sub-btn { background: transparent; color: var(--c); border: 1px solid var(--line);
+  padding: 3px 12px; font-size: 13px; }
+.s-sub-btn:hover:not(:disabled) { border-color: var(--c); }
+
+/* --- カメラ (ドロップダウン + 選択中のカメラの縮小画像) --- */
+.s-select { width: 100%; max-width: 560px; padding: 8px 10px; font: inherit;
+  background: #020604; color: var(--fg); border: 1px solid var(--c); }
+.s-select option { background: #020604; color: var(--fg); }
+.s-select:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+.s-preview { margin: 10px 0 0; width: 100%; max-width: 360px;
+  border: 1px solid var(--line); background: var(--panel); }
+.s-preview img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
+  background: #050a07; }
+.s-preview img[hidden] { display: none; }
+.s-preview figcaption { padding: 4px 10px; color: var(--dim); font-size: 12px;
+  border-top: 1px solid var(--line); }
+.s-preview figcaption.warn { color: var(--warn); }
+
+/* --- モデル --- */
+.s-models { display: grid; gap: 6px; }
+.s-model { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px;
+  border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+.s-model input[type="radio"] { margin-top: 5px; accent-color: var(--c); }
+.s-model:has(input[type="radio"]:checked) { border-color: var(--c); }
+.s-model-body { flex: 1; min-width: 0; display: flex; flex-wrap: wrap;
+  align-items: baseline; gap: 2px 12px; }
+.s-model-name { font-weight: 700; overflow-wrap: anywhere; }
+.s-model-desc { color: var(--dim); font-size: 13px; }
+.s-badge { font-size: 11px; padding: 0 6px; border: 1px solid var(--line); color: var(--c);
+  white-space: nowrap; }
+.s-badge.dl { color: var(--warn); border-color: rgba(255, 204, 0, .4); }
+.s-custom { margin-top: 6px; }
+.s-custom input[type="text"] { flex: 1; min-width: 180px; background: #020604; color: var(--fg);
+  border: 1px solid var(--line); padding: 3px 8px; font: inherit; font-size: 14px; }
+
+/* --- 開始 --- */
+.s-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: 12px 20px; border-top: 1px solid var(--line); padding-top: 14px; }
+.s-status { margin: 0; flex: 1; min-width: 200px; color: var(--dim); }
+.s-status.busy::after { content: ""; display: inline-block; width: 1.2em; text-align: left;
+  animation: s-dots 1.2s steps(4, end) infinite; }
+.s-status.err { color: var(--err); }
+@keyframes s-dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+.s-start { background: var(--c); color: #001a0b; border: 0; padding: 10px 22px;
+  font-weight: 700; letter-spacing: .1em; }
+.s-start kbd { margin-left: 8px; font: inherit; font-size: 11px; font-weight: 400;
+  padding: 0 5px; border: 1px solid rgba(0, 26, 11, .5); }
+
+@media (prefers-reduced-motion: reduce) {
+  .s-status.busy::after { animation: none; content: "..."; }
+}

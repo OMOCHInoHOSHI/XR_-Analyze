@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import os
 import platform
-from pathlib import Path
+import sys
 
 from .calib_store import calib_path as _calib_path
 from .calib_store import load as _load_saved_view
+from .paths import DATA_DIR
 
 # サーバ画面で 's' を押して保存した調整値(ズーム/切り抜き位置)。
 # 環境変数で明示されていない項目だけがこの値を初期値として使う。
@@ -76,6 +77,15 @@ CAM_NAME: str = os.environ.get("CAM_NAME", "Innomaker")
 CAM_WIDTH: int = _int("CAM_WIDTH", 1280)
 CAM_HEIGHT: int = _int("CAM_HEIGHT", 720)
 CAM_FPS: int = _int("CAM_FPS", 30)
+# カメラに要求する映像の符号化方式 (FOURCC 4文字)。空文字なら要求しない。
+# Windows の DirectShow は UVC カメラを既定で非圧縮 YUY2 で開き、USB 帯域の都合で
+# 1280x720 が 5〜10fps に落ちやすい。MJPG を要求すると 30fps が出るため、
+# Windows だけ既定で MJPG にする (理由: docs/adr/0041-windows-camera-support.md)
+CAM_FOURCC: str = os.environ.get(
+    "CAM_FOURCC", "MJPG" if platform.system() == "Windows" else ""
+).strip()
+# 起動画面でカメラを探すとき、名前が取れない環境で試す index の数 (0〜N-1)。
+CAM_PROBE_MAX: int = _int("CAM_PROBE_MAX", 6)
 
 # --- カメラ自動再接続 ---
 # 接触不良などでカメラが途中で外れても、再び刺されば自動で再オープンし、
@@ -198,6 +208,15 @@ def _auto_device() -> str:
 # 空文字なら ultralytics の自動選択。Apple Silicon では自動で 'mps' になる。
 DEVICE: str = _auto_device()
 
+# --- 起動 ---
+# 起動画面 (ブラウザ) で、使うカメラと検出モデルを選んでから検出を始める。
+# 0 で従来どおり即座に検出を始める (`--no-select` と同じ)。
+# 動作の詳細: docs/adr/0043-startup-selection-screen.md
+SETUP: bool = _bool("SETUP", True)
+# 起動したらブラウザで画面を開く。exe (ダブルクリック起動) では既定で開き、
+# 開発時の `python -m backend.server` では従来どおり開かない。
+OPEN_BROWSER: bool = _bool("OPEN_BROWSER", bool(getattr(sys, "frozen", False)))
+
 # --- 配信 ---
 HOST: str = os.environ.get("HOST", "127.0.0.1")
 PORT: int = _int("PORT", 8100)
@@ -245,7 +264,7 @@ EXPLAIN_TIMEOUT_SEC: float = _float("EXPLAIN_TIMEOUT_SEC", 60.0)
 # 空文字にすると永続化を無効化し、プロセス内キャッシュのみで動く。
 EXPLAIN_CACHE_PATH: str = os.environ.get(
     "EXPLAIN_CACHE_PATH",
-    str(Path(__file__).resolve().parent.parent / "explain_cache.json"),
+    str(DATA_DIR / "explain_cache.json"),
 ).strip()
 
 # --- 読み上げ (TTS) ---
@@ -285,7 +304,7 @@ TTS_TIMEOUT_SEC: float = _float("TTS_TIMEOUT_SEC", 20.0)
 # 永続化を無効にする(既定はリポジトリ直下の calib.json に倣いルート相対)。
 # 容量の目安: WAV(24kHz/16bit/mono)は1件あたり0.5〜1MB程度。COCO 80クラス
 # 全件で40〜70MB程度になる見込み(推定: docs/adr/0039-speak-persistent-cache.md)。
-_DEFAULT_SPEAK_CACHE_DIR = Path(__file__).resolve().parent.parent / "speak_cache"
+_DEFAULT_SPEAK_CACHE_DIR = DATA_DIR / "speak_cache"
 SPEAK_CACHE_DIR: str = os.environ.get("SPEAK_CACHE_DIR", str(_DEFAULT_SPEAK_CACHE_DIR))
 
 # --- 終了 ---

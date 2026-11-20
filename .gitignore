@@ -16,6 +16,10 @@ venv/
 calib.json.tmp
 explain_cache.json.tmp
 
+# exe のビルド生成物 (build_exe.ps1 の出力。再生成可能で数GBある)
+build/
+dist/
+
 # OS
 .DS_Store
 Thumbs.db

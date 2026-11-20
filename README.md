@@ -17,10 +17,16 @@ XR_ Analyze/
 ├── backend/    Python: カメラ取得 + YOLO検出 + 配信 (FastAPI)
 ├── frontend/   Web: 黒背景で検出枠を描画(ARの叩き台)
 ├── docs/       使い方・設定・APIなどのドキュメント (docs/adr/ に設計判断の記録)
+├── packaging/  Windows 向け exe の設定 (build_exe.ps1 で使う)
+├── build_exe.ps1  exe のビルド (docs/windows.md)
 └── README.md
 ```
 
 ## インストール方法
+
+**Windows で exe を使う場合**は Python の準備は要りません。`XRAnalyze.exe` を
+ダブルクリックするだけです。exe の使い方・作り方と、Windows で GPU (CUDA) を使う
+venv の作り方は [docs/windows.md](docs/windows.md) を参照してください。
 
 Python 3.9+ を推奨。
 
@@ -28,6 +34,7 @@ Python 3.9+ を推奨。
 cd "XR_ Analyze"
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
+# Windows で NVIDIA GPU を使う場合は先に CUDA 版の torch を入れる (docs/windows.md)
 pip install -r backend/requirements.txt
 ```
 
@@ -45,7 +52,11 @@ ollama serve                    # 鑑定文の生成 (別ターミナル)
 python3 -m backend.server
 ```
 
-ブラウザで `http://127.0.0.1:8100/` を開きます。
+ブラウザで `http://127.0.0.1:8100/` を開くと、まず**起動画面**が出ます。接続中の
+カメラ (名前・解像度・縮小画像) と使える検出モデルが並ぶので、選んで
+「この設定で開始」(`Enter`) を押すと検出が始まり、下のキーで操作する画面に切り替わります
+([ADR-0043](docs/adr/0043-startup-selection-screen.md))。起動画面を飛ばして環境変数の
+設定ですぐ始めるには `python3 -m backend.server --no-select` です。
 
 | キー | 動作 |
 |---|---|

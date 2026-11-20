@@ -11,3 +11,7 @@ websockets>=12.0
 
 # macOS only: カメラ名をOpenCVと同じ並び順で取得し、CAM_NAMEで正しく選択するため
 pyobjc-framework-AVFoundation>=10.0 ; sys_platform == "darwin"
+
+# Windows only: カメラ名を DirectShow (OpenCV CAP_DSHOW と同じ並び順) で取得し、
+# CAM_NAME と起動画面のカメラ名表示に使うため (docs/adr/0041-windows-camera-support.md)
+pygrabber>=0.2 ; sys_platform == "win32"

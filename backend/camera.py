@@ -145,6 +145,38 @@ def _backend_for_os() -> int:
     return cv2.CAP_ANY
 
 
+def open_capture(
+    index: int, width: int, height: int, fps: int = 0, fourcc: str = ""
+) -> Optional[cv2.VideoCapture]:
+    """
+    OS に合ったバックエンドで index のカメラを開き、要求値を設定して返す。
+    開けなければ None (開けなかったリソースは解放済み)。
+
+    fourcc (例: "MJPG") は解像度より先に設定する。DirectShow は解像度の設定時に
+    その時点の符号化方式で対応モードを探すため、後から変えると要求解像度に
+    届かないことがある (理由: docs/adr/0041-windows-camera-support.md)
+    """
+    cap = cv2.VideoCapture(index, _backend_for_os())
+    if not cap.isOpened():
+        # バックエンド指定で開けない場合はデフォルトで再試行
+        cap.release()
+        cap = cv2.VideoCapture(index)
+    if not cap.isOpened():
+        cap.release()
+        return None
+
+    if len(fourcc) == 4:
+        try:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+        except cv2.error:
+            pass  # 対応していないバックエンドでは要求しないのと同じ
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if fps > 0:
+        cap.set(cv2.CAP_PROP_FPS, fps)
+    return cap
+
+
 class Camera:
     """USBカメラからフレームを読むラッパー。"""
 
@@ -158,11 +190,13 @@ class Camera:
         zoom: float = 1.0,
         offset_x: float = 0.0,
         offset_y: float = 0.0,
+        fourcc: str = "",
     ):
         self.index = index
         self.width = width
         self.height = height
         self.fps = fps
+        self.fourcc = fourcc
         self._flip_code = flip_code_for(flip)
         # 公開属性として保持: 書き手は単一の呼び出し元のみなのでロック不要 (理由: docs/adr/0006-single-background-pipeline.md)
         self.zoom, self.offset_x, self.offset_y = clamp_view(zoom, offset_x, offset_y)
@@ -186,21 +220,12 @@ class Camera:
         成否で返す (理由: docs/adr/0035-camera-auto-reconnect.md)
         """
         try:
-            backend = _backend_for_os()
-            cap = cv2.VideoCapture(self.index, backend)
-            if not cap.isOpened():
-                # バックエンド指定で開けない場合はデフォルトで再試行
-                cap.release()
-                cap = cv2.VideoCapture(self.index)
-            if not cap.isOpened():
-                # 開けなかったリソースは捨てる。再接続は無限リトライになるため、
-                # 未開放の VideoCapture が試行のたびに溜まらないようにする
-                cap.release()
+            # 開けなかったリソースは open_capture が捨てる。再接続は無限リトライに
+            # なるため、未開放の VideoCapture が試行のたびに溜まらないようにする
+            cap = open_capture(self.index, self.width, self.height, self.fps, self.fourcc)
+            if cap is None:
                 return False
 
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            cap.set(cv2.CAP_PROP_FPS, self.fps)
             # 遅延を減らすためバッファを最小化(対応していないバックエンドでは無視される)
             try:
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
