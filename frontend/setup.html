@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>XR Analyze 起動</title>
-<link rel="stylesheet" href="/static/setup.css" />
+<link rel="stylesheet" href="/static/setup.css?v=2" />
 </head>
 <body>
 <!-- 起動画面。カメラと検出モデルを選んでから検出を始める
@@ -53,6 +53,8 @@
     </div>
   </form>
 </main>
-<script src="/static/setup.js"></script>
+<!-- ?v= は、この版より前にブラウザへキャッシュされた setup.js を使わせないため
+     (以降はサーバが no-cache を付けるので、版を上げる必要は無い) -->
+<script src="/static/setup.js?v=2"></script>
 </body>
 </html>

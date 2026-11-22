@@ -28,6 +28,10 @@ Windows では、次の方法があります。
 - 仕組みと、exe そのものを ZIP に入れなかった理由は
   [ADR-0044](adr/0044-zip-bootstrap-launcher.md)
 
+- **開始を押しても画面が切り替わらず、再読み込みを繰り返す**: 古い版で開いた起動画面が
+  ブラウザに残っているためです (修正済み。[ADR-0043](adr/0043-startup-selection-screen.md) の追記)。
+  新しい版で起動し直し、それでも出るときはブラウザで Ctrl+F5 を押してください
+
 ## A. exe で起動する
 
 `dist\XRAnalyze\` フォルダ (配布された zip を展開したもの) の `XRAnalyze.exe` を

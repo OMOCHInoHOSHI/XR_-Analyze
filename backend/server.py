@@ -120,12 +120,21 @@ async def healthz():
     }
 
 
+# `/` は同じ URL のまま「開始前は起動画面、開始後は本画面」と中身が変わる。
+# キャッシュの指定が無いと、ブラウザは Last-Modified から鮮度を推定し (経過時間の
+# 1割、ファイルが3日前なら約7時間)、その間サーバに問い合わせずに古い起動画面を出す。
+# 起動画面は「もう稼働中」と見て `/` へ移り、またキャッシュの起動画面が出る、という
+# 再読み込みの無限ループになった。ページは常にサーバから取らせる
+# (理由: docs/adr/0043-startup-selection-screen.md の追記)。
+_NO_STORE = {"Cache-Control": "no-store"}
+
+
 @app.get("/")
 async def index():
     # 検出を始める前は起動画面を出す。始まった後は従来どおりの画面
     html = FRONTEND_DIR / ("index.html" if pipeline is not None else "setup.html")
     if html.exists():
-        return FileResponse(str(html))
+        return FileResponse(str(html), headers=_NO_STORE)
     return JSONResponse(
         {"message": "backend running", "ws": "/ws", "video": "/video", "health": "/healthz"}
     )
@@ -133,7 +142,7 @@ async def index():
 
 @app.get("/setup")
 async def setup_page():
-    return FileResponse(str(FRONTEND_DIR / "setup.html"))
+    return FileResponse(str(FRONTEND_DIR / "setup.html"), headers=_NO_STORE)
 
 
 # --- 起動画面 (理由: docs/adr/0043-startup-selection-screen.md) ---
@@ -223,9 +232,24 @@ async def setup_status():
     return _startup.status()
 
 
+class _RevalidatedStaticFiles(StaticFiles):
+    """
+    使うたびにサーバへ確かめさせる (Cache-Control: no-cache) 静的配信。
+
+    指定が無いと、ZIP を展開し直して JS を更新しても、ブラウザが推定した鮮度の間は
+    古い JS が使われる。no-cache なら ETag で確かめるだけなので、変わっていなければ
+    304 で済み、転送は増えない。
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # フロントの静的資源 (style.css / app.js) の配信。index.html だけは上の / から
 # FileResponse で配るので、ここへ含める必要はない。
-app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+app.mount("/static", _RevalidatedStaticFiles(directory=FRONTEND_DIR), name="static")
 
 
 class CalibRequest(BaseModel):
@@ -677,7 +701,9 @@ def _open_browser_when_ready(server) -> None:
                 return
             time.sleep(0.1)
         if server.started:
-            webbrowser.open(f"http://{_browser_host()}:{config.PORT}/")
+            # 時刻を付けて毎回別の URL にする。この修正より前の版で、ブラウザに `/` の
+            # 起動画面がキャッシュされたまま残っていても、それを使わせないため
+            webbrowser.open(f"http://{_browser_host()}:{config.PORT}/?t={int(time.time())}")
 
     threading.Thread(target=wait_and_open, daemon=True).start()
 

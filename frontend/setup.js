@@ -149,10 +149,49 @@ async function loadOptions(refresh) {
   }
 }
 
+// 稼働中なのに起動画面へ戻ってきた回数。本画面へ移ったはずが、ブラウザのキャッシュ
+// などでまた起動画面が出ると、ここから `/` へ移って…と再読み込みが止まらなくなる。
+// 一定回数を超えたら移るのをやめて案内を出す。
+const BOUNCE_KEY = "xr-setup-bounce";
+const BOUNCE_LIMIT = 3;
+
+function readBounce() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(BOUNCE_KEY) || "null");
+    // 古い記録 (前回の起動など) は数えない
+    return v && Date.now() - v.at < 15000 ? v.n : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function writeBounce(n) {
+  try {
+    sessionStorage.setItem(BOUNCE_KEY, JSON.stringify({ n, at: Date.now() }));
+  } catch (e) {
+    // 使えない環境では数えない (この画面自体は動く)
+  }
+}
+
+function goMain() {
+  const n = readBounce();
+  if (n >= BOUNCE_LIMIT) {
+    stopPolling();
+    setStatus(
+      "検出は始まっていますが、本画面に切り替わりません。Ctrl+F5 で再読み込みしてください。",
+      "err",
+    );
+    return;
+  }
+  writeBounce(n + 1);
+  setStatus("検出を開始しました。画面を切り替えます", "busy");
+  // 時刻を付けて毎回別の URL にし、キャッシュに残った `/` (起動画面) を使わせない
+  location.replace(`/?t=${Date.now()}`);
+}
+
 function followStatus(s) {
   if (s.state === "running") {
-    setStatus("検出を開始しました。画面を切り替えます", "busy");
-    location.replace("/");
+    goMain();
     return;
   }
   if (s.state === "starting") {
