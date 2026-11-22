@@ -37,12 +37,13 @@ if (Get-Process XRAnalyze -ErrorAction SilentlyContinue) {
 # データ (調整値・キャッシュ・ダウンロードしたモデル・ログ) は退避して戻す。
 $keepNames = @("calib.json", "explain_cache.json", "speak_cache", "*.pt", "XRAnalyze*.log")
 $keep = "build\_keep"
-if (Test-Path $keep) { Remove-Item $keep -Recurse -Force }
+# 前回のビルドが途中で失敗していると、退避したデータがここに残っている。消さずにそのまま
+# 引き継ぐ (下で dist から退避するものと合わせて、ビルド後に戻す)。
 New-Item -ItemType Directory -Force $keep | Out-Null
 if (Test-Path $out) {
     foreach ($name in $keepNames) {
         Get-ChildItem (Join-Path $out $name) -ErrorAction SilentlyContinue |
-            ForEach-Object { Move-Item $_.FullName $keep }
+            ForEach-Object { Move-Item $_.FullName $keep -Force }
     }
 }
 
