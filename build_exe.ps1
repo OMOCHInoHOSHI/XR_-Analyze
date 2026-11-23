@@ -35,7 +35,7 @@ if (Get-Process XRAnalyze -ErrorAction SilentlyContinue) {
 
 # PyInstaller は dist\XRAnalyze を丸ごと消して作り直す。exe の隣に溜まった利用者の
 # データ (調整値・キャッシュ・ダウンロードしたモデル・ログ) は退避して戻す。
-$keepNames = @("calib.json", "explain_cache.json", "speak_cache", "*.pt", "XRAnalyze*.log")
+$keepNames = @("calib.json", "explain_cache.json", "speak_cache", "*.pt", "vosk-model-*", "XRAnalyze*.log")
 $keep = "build\_keep"
 # 前回のビルドが途中で失敗していると、退避したデータがここに残っている。消さずにそのまま
 # 引き継ぐ (下で dist から退避するものと合わせて、ビルド後に戻す)。

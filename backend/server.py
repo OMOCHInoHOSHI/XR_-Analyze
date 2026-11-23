@@ -17,6 +17,8 @@
   POST /calib/save  -> 現在の調整値をファイルへ保存 (次回起動時に自動で復元)
   POST /explain     -> 物体ラベルから日本語の説明文を生成 (Ollama のローカルLLM)
   POST /speak       -> 鑑定文の読み上げ音声(WAV)を返す (VOICEVOX / macOS の say)
+  WS   /voice       -> 音声コマンド: マイクの音量と聞き取った言葉を配信 (最後に開いた画面だけ)
+  POST /shutdown    -> アプリを終了する (音声の「終了」。この PC からの要求だけ受け付ける)
 
 起動:
   cd "XR_ Analyze"
@@ -33,14 +35,15 @@ import threading
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import cv2
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calib_store, config, devices, models, speak_cache, startup, tts
+from . import calib_store, config, devices, models, speak_cache, startup, tts, voice
 # モジュール名を明示的に別名にするのは、下の /explain ハンドラ関数名が
 # `explain` で、モジュール名とかぶるため(ハンドラ定義でグローバルの
 # `explain` がハンドラ関数自身に上書きされてしまう)。
@@ -61,10 +64,24 @@ FRONTEND_DIR = RESOURCE_DIR / "frontend"
 # main() でシグナルハンドラに割り込み、キャンセルされる前にループへ知らせる。
 _shutting_down = threading.Event()
 
+# 音声コマンドの聞き手 (理由: docs/adr/0045-voice-commands.md)。lifespan で作る。
+# 起動画面でカメラを選んでいる間にモデルの読み込みを済ませるため、検出の開始を待たない。
+_voice: voice.VoiceListener = voice.disabled()
+
+# 実行中の uvicorn.Server。POST /shutdown から止めるために main() が入れる。
+_uvicorn_server = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global pipeline
+    global pipeline, _voice
+    if config.VOICE:
+        _voice = voice.VoiceListener(
+            Path(config.VOSK_MODEL), config.VOSK_MODEL_URL, config.MIC_NAME
+        )
+        _voice.start()
+    else:
+        print("[voice] 音声コマンドは無効です (VOICE=0)")
     # 事前生成済みの鑑定文キャッシュを読み込む(理由: docs/adr/0038-explain-persistent-cache.md)。
     # ファイルが無い/壊れていても explain.load_cache 側で空dictに落として起動を止めない。
     _explain_cache.update(explain_mod.load_cache(config.EXPLAIN_CACHE_PATH))
@@ -82,6 +99,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         _startup.cancel()
+        _voice.stop()
         if pipeline is not None:
             pipeline.stop()
 
@@ -636,6 +654,81 @@ async def ws_detections(ws: WebSocket):
         return
 
 
+# 開いている /voice の接続の番号。コマンドは一番新しい接続 (= 最後に開いたタブ) にだけ
+# 送る。タブを2つ開いたまま話すと両方が同じ操作をしてしまうため
+# (理由: docs/adr/0045-voice-commands.md)。
+_voice_conns: set[int] = set()
+_voice_conn_next = 0
+
+# 「別のタブで使用中」をブラウザへ伝える状態。voice の状態に1つ足したもの。
+VOICE_ELSEWHERE = "elsewhere"
+
+
+@app.websocket("/voice")
+async def ws_voice(ws: WebSocket):
+    """
+    音声コマンドの配信。毎回 {"state", "level"} を、聞き取ったときは "cmd" と "word" も
+    添えて送る。音量は鑑定盤の波形の描画に使う (VoiceListener.LEVEL_HZ と同じ頻度)。
+    """
+    global _voice_conn_next
+    await ws.accept()
+    _voice_conn_next += 1
+    me = _voice_conn_next
+    _voice_conns.add(me)
+    # つないだ時点より前に聞き取った言葉は送らない (再接続で古い操作が走らないように)
+    last_seq = _voice.seq
+    interval = 1.0 / voice.LEVEL_HZ
+    try:
+        while True:
+            if _shutting_down.is_set():
+                return
+            owner = me == max(_voice_conns)
+            events = _voice.events(last_seq)
+            if events:
+                last_seq = events[-1][0]
+            if owner:
+                msg = {"state": _voice.state, "level": round(_voice.level, 3)}
+                for _, cmd, word in events:
+                    await ws.send_json({**msg, "cmd": cmd, "word": word})
+                await ws.send_json(msg)
+            else:
+                await ws.send_json({"state": VOICE_ELSEWHERE, "level": 0.0})
+            await asyncio.sleep(interval)
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        return
+    finally:
+        _voice_conns.discard(me)
+
+
+# /shutdown を受け付ける相手。この PC のブラウザからだけ止められるようにする。
+# HOST=0.0.0.0 で公開していても、他の機器からアプリを止められては困るため。
+# "testclient" は FastAPI の TestClient が名乗る相手先 (実際の通信では IP しか来ない)。
+_LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _request_shutdown() -> None:
+    """Ctrl+C と同じ手順で止める (理由: docs/adr/0032-prompt-shutdown.md)。"""
+    print("[XR Analyze] 終了の指示を受けました")
+    _shutting_down.set()
+    if _uvicorn_server is not None:
+        _uvicorn_server.should_exit = True
+
+
+@app.post("/shutdown")
+async def shutdown(request: Request, background: BackgroundTasks):
+    """
+    アプリを終了する (音声コマンドの「終了」)。応答を返してから止め始める。
+    ブラウザのタブはページの側から閉じられないため、画面の後始末はフロントが行う。
+    """
+    host = request.client.host if request.client else ""
+    if host not in _LOOPBACK:
+        raise HTTPException(status_code=403, detail="この PC からだけ終了できます")
+    background.add_task(_request_shutdown)
+    return {"status": "ok"}
+
+
 def _mjpeg_generator(annotate: bool):
     boundary = b"--frame"
     encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.JPEG_QUALITY]
@@ -744,6 +837,8 @@ def main(argv: list[str] | None = None) -> None:
         timeout_graceful_shutdown=config.SHUTDOWN_GRACE_SEC,
     )
     server = uvicorn.Server(server_config)
+    global _uvicorn_server
+    _uvicorn_server = server
 
     # Ctrl+C (SIGINT) / SIGTERM を受けた"瞬間"に _shutting_down を立てる。
     # uvicorn.Server.handle_exit はシグナルハンドラそのものなので、ここに割り込めば

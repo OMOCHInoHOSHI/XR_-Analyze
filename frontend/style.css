@@ -61,6 +61,12 @@ html, body { margin: 0; height: 100%; background: #000; color: #0f0;
 #p-modename::before { content: "◇ "; }
 .p-msg { display: none; margin-top: 3px; opacity: .9; }
 .p-credit { margin-top: 3px; font-size: 11px; opacity: .55; letter-spacing: .05em; }
+/* 音声の行。波形は canvas に JS が --c の色で描く (理由: docs/adr/0045-voice-commands.md)。
+   右の短い文字は「とじる / 終了」「マイク無し」などの補足で、無ければ空。 */
+.p-voice { display: flex; align-items: center; }
+#p-wave { width: 132px; height: 24px; display: block; }
+#p-vnote { margin-left: 8px; font-size: 11px; opacity: .7; letter-spacing: .04em;
+  white-space: nowrap; }
 /* デバッグ行(fps・調整値・意匠・キー一覧)。盤の下に小さく置く。 */
 #hud { margin-top: 6px; font-size: 12px; opacity: .75; color: var(--c);
   text-shadow: 0 0 2px #000; letter-spacing: 0;
@@ -214,6 +220,18 @@ html, body { margin: 0; height: 100%; background: #000; color: #0f0;
 .rc-main::before { content: "◇ "; }
 .rc-sub { margin-top: 8px; font-size: calc(15px * var(--ui-scale));
   letter-spacing: .12em; opacity: .85; }
+
+/* --- 終了後の画面 (音声の「終了」でサーバを止めた後) ---
+   全面を黒で塞ぎ、止まったことだけを示す。黒はグラスでは透過するので、
+   文字だけが浮かぶ。色と書体は盤と同じく意匠から受け取る。 */
+#ended { position: absolute; inset: 0; display: none; z-index: 10;
+  background: #000; color: var(--c); font-family: var(--face); text-align: center;
+  align-items: center; justify-content: center; flex-direction: column; }
+#ended.on { display: flex; animation: e-in .16s ease-out; }
+.ed-main { font-size: calc(24px * var(--ui-scale)); font-weight: 700; letter-spacing: .12em; }
+.ed-main::before { content: "◇ "; }
+.ed-sub { margin-top: 8px; font-size: calc(15px * var(--ui-scale));
+  letter-spacing: .12em; opacity: .7; }
 
 /* --- 枠の基本形 (= 意匠「素の緑」。他の意匠はこれを上書きする) --- */
 .box { position: absolute; box-sizing: border-box;

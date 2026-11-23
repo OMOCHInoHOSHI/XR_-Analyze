@@ -3,7 +3,7 @@
 # 構成の理由: docs/adr/0042-windows-exe-packaging.md
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).parent
 
@@ -28,6 +28,10 @@ binaries = [
     for p in sorted(_tv_dir.iterdir())
     if p.suffix.lower() in (".pyd", ".dll")
 ]
+# 音声コマンドの Vosk (docs/adr/0045-voice-commands.md)。libvosk.dll はパッケージの
+# フォルダから名前で読まれる (ffi.dlopen) ため、PyInstaller の解析では拾われない。
+# vosk/ の下へそのまま置く。sounddevice の PortAudio は既存のフックが拾う。
+binaries += collect_dynamic_libs("vosk")
 
 # 文字列で動的に import されるもの。uvicorn はループ・プロトコル実装を名前で選ぶ。
 hiddenimports = (
@@ -35,6 +39,8 @@ hiddenimports = (
     + collect_submodules("backend")
     + collect_submodules("ultralytics")
     + ["pygrabber.dshow_graph", "comtypes.client"]
+    # backend/voice.py は使う直前に import するので明示しておく
+    + ["vosk", "sounddevice"]
 )
 
 a = Analysis(

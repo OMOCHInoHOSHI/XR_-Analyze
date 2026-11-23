@@ -60,6 +60,7 @@
 | [0042](0042-windows-exe-packaging.md) | Windows 向けに PyInstaller のフォルダ形式で exe を作り、CUDA 版 torch を同梱する | `paths.py` / `packaging/` / `build_exe.ps1` |
 | [0043](0043-startup-selection-screen.md) | 起動画面でカメラと検出モデルを選んでから検出を始める | `server.py` / `startup.py` / `models.py` / `frontend/setup.html` |
 | [0044](0044-zip-bootstrap-launcher.md) | Download ZIP からは exe でなく起動用 .bat で動かし、依存は初回に取得する | `XRAnalyze.bat` / `packaging/bootstrap.ps1` |
+| [0045](0045-voice-commands.md) | 音声コマンドは Vosk で言葉を絞って PC の中で聞き取り、判断はブラウザで行う | `voice.py` / `server.py` / `config.py` / `frontend/app.js` |
 
 > **0022 は欠番です。** 矢印の選び替えを「軸に沿った輪」にして端で一周させる決定を
 > 一度入れましたが、要求の読み違いだったため実装ごと取り消しました。経緯は

@@ -23,7 +23,7 @@
   <div id="wheel">
     <i class="w-ring"></i>
     <i class="w-mark"></i>
-    <div class="w-hub"><b>モ ー ド</b>数字で確定 / ←↑↓→ と Enter</div>
+    <div class="w-hub"><b>モ ー ド</b>数字で確定 / ←↑↓→ と Enter<br>声:「いち」「に」「とじる」</div>
   </div>
   <!-- 説明ウィンドウ。単体鑑定で固定した物体のLLM説明を出す。
        タイトルと本文は JS が textContent で差し替える (検出名を扱うため
@@ -31,7 +31,7 @@
   <div id="explain">
     <div class="e-head">
       <span class="e-name" id="e-name"></span>
-      <span class="e-key">Enter/Esc で閉じる</span>
+      <span class="e-key">Enter/Esc・「とじる」で閉じる</span>
     </div>
     <div id="e-body"></div>
     <!-- 読み上げの音声を待っている間だけ出す帯。動く印(dots)は装飾なので
@@ -52,6 +52,12 @@
     <div class="cg-row"><span class="cg-key">s</span>保存</div>
     <div class="cg-row"><span class="cg-key">m</span>モードへ</div>
   </div>
+  <!-- 音声の「終了」でアプリを止めた後の画面。タブはページの側から閉じられないため、
+       止めたことだけを示して終わる (理由: docs/adr/0045-voice-commands.md) -->
+  <div id="ended">
+    <div class="ed-main">終了しました</div>
+    <div class="ed-sub">このタブは閉じて構いません</div>
+  </div>
   <!-- 鑑定盤。DOMは固定で、render() が中身のテキストだけを差し替える
        (検出名を扱うため innerHTML は使わない)。 -->
   <div id="ui">
@@ -61,6 +67,9 @@
         <span class="p-title">鑑 定 眼</span><span id="p-state">待機</span>
       </div>
       <div><span class="p-key">鑑定法</span><span id="p-modename">広域鑑定</span></div>
+      <!-- 音声コマンドの聞き取り。マイクの音量を波形で出す。描画は JS が canvas に行い、
+           右の短い文字は受け付けが限られているときなどの補足 (理由: docs/adr/0045-voice-commands.md) -->
+      <div class="p-voice"><span class="p-key">音声</span><canvas id="p-wave" width="132" height="24"></canvas><span id="p-vnote"></span></div>
       <div class="p-credit">VOICEVOX:青山龍星</div>
       <div class="p-msg" id="p-msg"></div>
     </div>

@@ -313,3 +313,19 @@ SPEAK_CACHE_DIR: str = os.environ.get("SPEAK_CACHE_DIR", str(_DEFAULT_SPEAK_CACH
 # 終われない。止めると決めた後の生成結果に用は無いので打ち切る
 # (理由: docs/adr/0032-prompt-shutdown.md)。
 SHUTDOWN_GRACE_SEC: float = _float("SHUTDOWN_GRACE_SEC", 2.0)
+
+# --- 音声コマンド ---
+# マイクで決まった言葉を聞き取り、キーと同じ操作をする (理由: docs/adr/0045-voice-commands.md)。
+# 0 にするとマイクに一切触れない。マイクやモデルが無いときは、キー操作だけで普通に動く。
+VOICE: bool = _bool("VOICE", True)
+# 使うマイクの名前の一部 (大文字小文字は無視)。空なら OS の既定のマイク。
+MIC_NAME: str = os.environ.get("MIC_NAME", "").strip()
+# Vosk の日本語モデルの置き場所。無ければ VOSK_MODEL_URL から初回だけ取ってきてここへ置く
+# (exe では exe の隣。検出モデル .pt と同じく利用者側に溜まるもの)。
+VOSK_MODEL: str = os.environ.get(
+    "VOSK_MODEL", str(DATA_DIR / "vosk-model-small-ja-0.22")
+)
+# モデルの取得元。空にすると取りに行かない (ネットにつながない環境で、手で置く場合)。
+VOSK_MODEL_URL: str = os.environ.get(
+    "VOSK_MODEL_URL", "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip"
+).strip()

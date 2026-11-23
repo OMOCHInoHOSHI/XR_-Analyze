@@ -9,6 +9,10 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 websockets>=12.0
 
+# 音声コマンド (docs/adr/0045-voice-commands.md)。日本語モデル (約50MB) は初回起動時に取得する
+vosk>=0.3.45            # ローカルの音声認識。認識する言葉を限定できる
+sounddevice>=0.4.6      # マイクの取得 (PortAudio。Windows / macOS は wheel に同梱)
+
 # macOS only: カメラ名をOpenCVと同じ並び順で取得し、CAM_NAMEで正しく選択するため
 pyobjc-framework-AVFoundation>=10.0 ; sys_platform == "darwin"
 
