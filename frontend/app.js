@@ -8,6 +8,13 @@
 //   c        : 調整モードの出入り(ズーム・切り抜き位置・保存はこの中だけ)
 //   d        : デバッグ映像のON/OFF (AR表示は OFF にして黒背景+枠だけにする)
 //   1〜6     : 枠の意匠(デザイン)を切替 ※デバッグ用。意匠決定後に削除する
+// 音声コマンド (マイクで聞き取る。理由: docs/adr/0045-voice-commands.md):
+//   「モード変更」         : 円盤を開く (声で開いたときは 6 秒で閉じる)
+//   「たんたいかんてい」「いち」 / 「こういきかんてい」「に」 : 円盤が開いているときだけ鑑定法を確定
+//   「鑑定」               : 単体鑑定で照準の対象を固定して鑑定 (固定中なら照準の対象へ移す)
+//   「とじる」             : 円盤 / 鑑定ウィンドウを閉じる
+//   「終了」               : アプリを終了する (いつでも)
+//   鑑定ウィンドウが開いている間は「とじる」「終了」だけを受け付ける
 // 調整モード中:
 //   ←↑↓→    : 切り抜き位置(表示位置)の移動
 //   + / = / -: デジタルズームの増減
@@ -118,6 +125,10 @@ let mode = loadMode();
 // 開いている間はすべてのキーを盤の操作として吸収し、本来の機能は動かさない
 // (理由: docs/adr/0019-key-binding-policy-v2.md)
 const WHEEL_MS = 3000;   // 無操作での自動キャンセル。キー操作のたびに延長する
+// 声で開いたときの自動キャンセル。話し終えてから聞き取るまで 0.3〜1 秒ほど遅れるため、
+// キーの 3 秒では言い切る前に閉じることがある (理由: docs/adr/0045-voice-commands.md)
+const WHEEL_VOICE_MS = 6000;
+let wheelMs = WHEEL_MS;  // 今開いている円盤の自動キャンセルまでの時間
 const WHEEL_R = 34;      // 環の半径。#wheel の一辺に対する %
 let wheelOpen = false;
 let wheelCursor = 0;     // Enter で確定する項目 = 12時の指標に来ているもの
@@ -300,6 +311,8 @@ let currentTarget = null;  // 単体鑑定で今表示している1件(矢印の
 let toastText = "";
 let toastUntil = 0;
 let lastPayload = null;  // 直近のWSペイロード(WS受信を待たずに描き直すため)
+let voicePrefix = "";    // 音声コマンドを処理している間だけ、報せの頭に付ける文字
+let ended = false;       // 音声の「終了」でアプリを止めた後か
 
 // 新フレームが来ないと /ws は送信しないため、直近のペイロードで描き直す (理由: docs/adr/0010-client-side-display-policy.md)
 function repaint() {
@@ -309,7 +322,8 @@ function repaint() {
 // メッセージの設定だけを行う。render() の中から呼んでも再帰しないよう、
 // 描き直しを伴う toast() と分けてある。
 function setToast(text, ms = 2000) {
-  toastText = text;
+  // 音声の操作中は、何と聞き取ったかを報せの頭に付ける (「≫ 鑑定 ── 鑑定を固定 ── 椅子」)
+  toastText = voicePrefix + text;
   toastUntil = Date.now() + ms;
   // 期限切れでメッセージを消すための描き直し(新フレームが来ない場合の保険)
   setTimeout(() => { if (Date.now() >= toastUntil) repaint(); }, ms + 50);
@@ -466,11 +480,12 @@ function bumpWheelTimer() {
     wheelOpen = false;
     renderWheel();
     repaint();
-  }, WHEEL_MS);
+  }, wheelMs);
 }
 
-function openWheel() {
+function openWheel(ms = WHEEL_MS) {
   wheelOpen = true;
+  wheelMs = ms;
   // 今いるモードが指標に来た状態で開く。Enter を空打ちしても何も変わらない。
   wheelCursor = Math.max(0, MODES.findIndex((m) => m.id === activeMode()));
   // 閉じている間は transition が働かないので、ここで直に合わせれば回らずに出る。
@@ -544,7 +559,7 @@ function retryVideo() {
     videoRetryTimer = null;
     // 'd' で非表示にされている間は試さない。死んだままの印(videoBroken)は残し、
     // 再表示したときに拾い直す。
-    if (!showVideo) return;
+    if (!showVideo || ended) return;
     videoBroken = false;
     video.src = `${VIDEO_SRC}&r=${Date.now()}`;
   }, VIDEO_RETRY_MS);
@@ -593,7 +608,11 @@ function toggleLock() {
     return;
   }
   // 選択中ならその対象を、選択していなければ照準が指している対象を固定する。
-  const target = sel || currentTarget;
+  lockOn(sel || currentTarget);
+}
+
+// 対象を固定して説明ウィンドウを開く。Enter と音声の「鑑定」で共有する。
+function lockOn(target) {
   if (!target) {
     toast("固定する対象がありません");
     return;
@@ -624,6 +643,8 @@ document.addEventListener("keydown", (e) => {
   // 修飾キー付きはブラウザ標準ショートカットなので触らない
   // (Shift は '+' の入力に要るので除外しない。理由: docs/adr/0019-key-binding-policy-v2.md)
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // 「終了」の後はサーバが止まっているので、何も受け付けない。
+  if (ended) return;
 
   // 円盤が開いている間は、すべてのキーを盤の操作として扱う。
   if (wheelOpen) {
@@ -981,11 +1002,200 @@ function render(payload) {
     `${calibText}${themePart}${hint}`;
 }
 
+// --- 音声コマンド -------------------------------------------------------------
+// サーバ (backend/voice.py) がマイクで聞き取った言葉を /voice で受け取り、キーと同じ
+// 操作をする。何を受け付けるかは今の状態 (円盤・鑑定ウィンドウ・鑑定法) で決まるので、
+// その判断はこのページで行う (理由: docs/adr/0045-voice-commands.md)。
+const pWave = document.getElementById("p-wave");
+const pVnote = document.getElementById("p-vnote");
+const endedScreen = document.getElementById("ended");
+const waveCtx = pWave.getContext("2d");
+// 「聞き取り中」以外のときに、波形の右へ出す短い文字。
+const VOICE_NOTE = {
+  off: "無効", loading: "準備中", nomic: "マイク無し", nomodel: "モデル未取得",
+  elsewhere: "別のタブで使用中", disconnected: "未接続",
+};
+const WAVE_W = 132, WAVE_H = 24;   // #p-wave の CSS の大きさ
+const WAVE_SPIKES = 9;             // 中央で振れる頂点の数
+const WAVE_FLASH_MS = 450;         // 聞き取って受け付けたときに光る長さ
+let voiceWs = null;
+let voiceState = "disconnected";
+let voiceLevel = 0;      // サーバから届いた最新の音量 (0〜1)
+let waveLevel = 0;       // 描画用に平滑化した音量
+let waveFlashAt = -1e9;
+
+// 声で操作する。受け付けたら true (波形を光らせる)。何もしない場面では黙って捨てる。
+function onVoiceCommand(cmd, word) {
+  if (ended) return false;
+  voicePrefix = `≫ ${word} ── `;
+  try {
+    return runVoiceCommand(cmd);
+  } finally {
+    voicePrefix = "";
+  }
+}
+
+function runVoiceCommand(cmd) {
+  // 「終了」だけはどの場面でも効く。
+  if (cmd === "quit") {
+    endApp();
+    return true;
+  }
+  // 鑑定ウィンドウが開いている間は「とじる」だけ。キーで Enter/Esc しか効かないのと
+  // そろえる。読み上げの声をマイクが拾っても (鑑定文には「鑑定」がよく出る)、
+  // ここで止まるので誤動作しない。
+  if (explainOpen) {
+    if (cmd !== "close") return false;
+    closeExplain();
+    toast("鑑定ウィンドウを閉じました");
+    return true;
+  }
+  // 円盤が開いている間は鑑定法を決めるか閉じるだけ。「いち」「に」はここでしか効かない
+  // ので、普段の会話で勝手にモードが変わることはない。
+  if (wheelOpen) {
+    if (cmd === "single" || cmd === "multi") {
+      closeWheel();
+      selectMode(cmd === "single" ? MODE_SINGLE : MODE_MULTI);
+      return true;
+    }
+    if (cmd === "close") {
+      closeWheel();
+      toast("モードの選択を閉じました");
+      return true;
+    }
+    return false;
+  }
+  if (cmd === "mode") {
+    openWheel(WHEEL_VOICE_MS);
+    toast("モードを選んでください");
+    return true;
+  }
+  if (cmd === "appraise") return voiceAppraise();
+  return false;
+}
+
+// 「鑑定」。Enter と違い、固定中に言っても解除にはせず、照準が今狙っている対象へ
+// 固定を移して鑑定し直す。声だけで「鑑定 → とじる → 次を見る → 鑑定」と続けるため。
+function voiceAppraise() {
+  if (calibMode) return false;
+  if (mode !== MODE_SINGLE) {
+    toast("鑑定は単体鑑定のみ (「モード変更」→「いち」)");
+    return true;
+  }
+  if (sel && selLocked) {
+    const target = lastPayload ? gazeTarget(lastPayload.detections, viewRect()) : null;
+    if (!target) {
+      toast("照準の先に対象がありません");
+      return true;
+    }
+    clearSel();
+    lockOn(target);
+    return true;
+  }
+  lockOn(sel || currentTarget);
+  return true;
+}
+
+// 「終了」。サーバを止め、画面は終了の表示で塞ぐ。タブはページの側から閉じられない。
+function endApp() {
+  ended = true;
+  closeWheel();
+  if (explainOpen) closeExplain();
+  stopSpeak();
+  endedScreen.classList.add("on");
+  video.removeAttribute("src");   // 映像の配信を切る (止まる前にこちらから閉じる)
+  if (voiceWs) voiceWs.close();
+  fetch("/shutdown", { method: "POST" }).catch(() => {});
+}
+
+function connectVoice() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/voice`);
+  voiceWs = ws;
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    voiceState = m.state;
+    voiceLevel = m.level || 0;
+    if (m.cmd && onVoiceCommand(m.cmd, m.word)) waveFlashAt = performance.now();
+  };
+  ws.onclose = () => {
+    voiceState = "disconnected";
+    voiceLevel = 0;
+    if (!ended) setTimeout(connectVoice, 1000);
+  };
+}
+
+// 波形。両端は平らなまま、中央の頂点だけが音の大きさで上下に交互に振れる。
+// 角は丸めない (デジタルっぽいギザギザ)。見本ページで合意した形。
+const waveDpr = Math.max(1, window.devicePixelRatio || 1);
+pWave.width = Math.round(WAVE_W * waveDpr);
+pWave.height = Math.round(WAVE_H * waveDpr);
+waveCtx.setTransform(waveDpr, 0, 0, waveDpr, 0, 0);
+let vnoteText = null;
+
+function drawWave() {
+  const listening = voiceState === "listening" && !ended;
+  // 立ち上がりは速く、減衰はゆっくり。届く音量そのままだと細かく震えすぎる。
+  const target = listening ? voiceLevel : 0;
+  waveLevel += (target - waveLevel) * (target > waveLevel ? 0.6 : 0.18);
+
+  const note = !listening ? (VOICE_NOTE[voiceState] || "")
+    : explainOpen ? "とじる / 終了" : "";
+  if (note !== vnoteText) { pVnote.textContent = note; vnoteText = note; }
+
+  const w = WAVE_W, h = WAVE_H, mid = h / 2;
+  const ctx = waveCtx;
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = getComputedStyle(pWave).color;   // 盤と同じ意匠の色 (--c)
+  ctx.lineJoin = "miter";
+  ctx.miterLimit = 10;
+  ctx.lineWidth = 1.4;
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  if (!listening) {
+    // 聞いていない: 平らな破線
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
+    return;
+  }
+  // 鑑定ウィンドウ中は受け付けが「とじる」「終了」だけなので薄くする
+  if (explainOpen) ctx.globalAlpha = 0.35;
+  const since = performance.now() - waveFlashAt;
+  if (since < WAVE_FLASH_MS) {
+    const f = 1 - since / WAVE_FLASH_MS;
+    ctx.shadowColor = ctx.strokeStyle;
+    ctx.shadowBlur = 10 * f;
+    ctx.lineWidth = 1.4 + 1.2 * f;
+    ctx.globalAlpha = Math.max(ctx.globalAlpha, 0.7 + 0.3 * f);
+  }
+  const x0 = w * 0.30, x1 = w * 0.70, amp = mid - 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, mid);
+  ctx.lineTo(x0, mid);
+  for (let i = 0; i < WAVE_SPIKES; i++) {
+    const p = (i + 0.5) / WAVE_SPIKES;
+    const env = Math.pow(Math.sin(Math.PI * p), 0.8);   // 中央ほど大きく振れる
+    const a = (waveLevel * env * (0.45 + 0.55 * Math.random()) + 0.04 * Math.random()) * amp;
+    ctx.lineTo(x0 + (x1 - x0) * p, mid + (i % 2 ? a : -a));
+  }
+  ctx.lineTo(x1, mid);
+  ctx.lineTo(w, mid);
+  ctx.stroke();
+}
+// サーバから音量が届く頻度 (backend/voice.py の LEVEL_HZ) と同じ 30 回/秒で描く
+setInterval(drawWave, 33);
+connectVoice();
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onmessage = (ev) => render(JSON.parse(ev.data));
-  ws.onclose = () => { hud.textContent = "disconnected — retrying…";
-    setTimeout(connect, 1000); };
+  ws.onclose = () => {
+    if (ended) return;   // 止めたのはこちら。つなぎ直さない
+    hud.textContent = "disconnected — retrying…";
+    setTimeout(connect, 1000);
+  };
 }
 connect();
