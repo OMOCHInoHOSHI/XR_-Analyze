@@ -20,6 +20,8 @@
 | POST | `/calib/save` | 現在の調整値をファイルへ保存 (次回起動時に自動で復元) |
 | POST | `/explain` | 物体ラベルから日本語の説明文を生成 (Ollama のローカルLLM) |
 | POST | `/speak` | 鑑定文の読み上げ音声(WAV)を返す (VOICEVOX または macOS の `say`) |
+| WS | `/voice` | 音声コマンド: マイクの音量と聞き取った言葉を約30回/秒で配信。最後に開いた接続にだけ送る (下記) |
+| POST | `/shutdown` | アプリを終了する (音声の「終了」)。この PC (ループバック) からの要求だけ受け付け、他は 403 |
 
 `/video` は単体で開く分は既定 (注釈付き) のままでよく、枠が二重になることはありません。
 トップページが `?annotate=0` を使うのは、枠をページ側で描くためです。
@@ -28,6 +30,26 @@
 起動画面 (`/setup/*`) の流れと理由は [ADR-0043](adr/0043-startup-selection-screen.md)。
 `--no-select` (または `SETUP=0`) で起動した場合、検出は起動と同時に始まり、`/setup/status` は
 最初から `running` を返します。
+
+## 音声コマンドの配信 (`/voice`)
+
+約30回/秒 (`backend/voice.py` の `LEVEL_HZ`) で次の JSON を送ります。言葉を聞き取ったときは
+`cmd` と `word` が付いた分が1つ増えます。つないだ時点より前に聞き取った言葉は送りません。
+
+```json
+{"state": "listening", "level": 0.42}
+{"state": "listening", "level": 0.42, "cmd": "appraise", "word": "鑑定"}
+```
+
+| キー | 値 |
+|---|---|
+| `state` | `listening` (聞き取り中) / `loading` (モデルの読み込み・取得中) / `off` (`VOICE=0`) / `nomic` (マイクが無い・開けない) / `nomodel` (モデルが無く取得もできない) / `elsewhere` (もっと新しい接続がある。この接続には `cmd` を送らない) |
+| `level` | マイクの音量 0〜1 (-60〜-10 dBFS を dB で直線に対応) |
+| `cmd` | `mode` / `single` / `multi` / `appraise` / `close` / `quit` |
+| `word` | 表示用の聞き取った言葉 (例: `モード変更`、`単体鑑定`、`に`) |
+
+`cmd` を今の画面でどう扱うかはクライアントが決めます。トップページの扱いは
+[voice-recognizer.md](voice-recognizer.md)、理由は [ADR-0045](adr/0045-voice-commands.md)。
 
 ## WebSocket の出力フォーマット (クライアント非依存の契約)
 

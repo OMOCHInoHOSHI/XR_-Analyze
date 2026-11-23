@@ -38,6 +38,10 @@
 | `OLLAMA_MODEL` | gemma4:e4b-mlx (Apple Silicon) / gemma4:e4b (その他) | AI説明の生成に使うモデル。`ollama pull` 済みのモデル名。Apple Silicon では MLX エンジン版が既定 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `OLLAMA_KEEP_ALIVE` | 30m | 生成後モデルをGPUメモリに残す時間。未ロードからの1回目は実測5〜19秒かかるため長め。`0` で即解放 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
 | `EXPLAIN_TIMEOUT_SEC` | 60.0 | AI説明の生成完了を待つ上限秒。コールド時は実測最大27秒 ([ADR-0036](adr/0036-llm-generation-latency.md)) |
+| `VOICE` | 1 | 音声コマンド ([voice-recognizer.md](voice-recognizer.md))。`0` でマイクに一切触れない ([ADR-0045](adr/0045-voice-commands.md)) |
+| `MIC_NAME` | (空) | 音声コマンドに使うマイクの名前の一部 (大文字小文字は無視)。空なら OS の既定のマイク |
+| `VOSK_MODEL` | ./vosk-model-small-ja-0.22 (exe では exe の隣) | 音声認識 (Vosk) のモデルフォルダ。無ければ `VOSK_MODEL_URL` から初回に取得する |
+| `VOSK_MODEL_URL` | alphacephei.com の vosk-model-small-ja-0.22.zip | モデルの取得元。空にすると取りに行かない (ネットの無い PC で手で置く場合) |
 | `EXPLAIN_CACHE_PATH` | ./explain_cache.json (exe では exe の隣) | 鑑定文の永続キャッシュ保存先。起動時に読み込み、新規生成のたびに書き戻す。空文字でプロセス内キャッシュのみに戻す ([ADR-0038](adr/0038-explain-persistent-cache.md)) |
 | `TTS_BACKEND` | voicevox | 鑑定文の読み上げ方式。`voicevox`(VOICEVOX ENGINE) / `say`(macOS同梱コマンド) / `off`(無効) |
 | `VOICEVOX_URL` | http://localhost:50021 | VOICEVOX ENGINE の接続先 |
