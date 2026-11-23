@@ -16,6 +16,10 @@ venv/
 calib.json.tmp
 explain_cache.json.tmp
 
+# 音声コマンドの Vosk 日本語モデル (初回起動時に取得する。展開後 95MB と大きく、
+# 取得元から同じものが取れるのでコミットしない: docs/adr/0045-voice-commands.md)
+vosk-model-*/
+
 # exe のビルド生成物 (build_exe.ps1 の出力。再生成可能で数GBある)
 build/
 dist/
